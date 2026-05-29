@@ -1,10 +1,23 @@
 <%# Services partial — expects: services (ServiceRecord[]) -%>
-<%- include('_helpers') -%>
 <%
-  const nFailed   = services.filter(s => s.state === ServiceState.Failed).length;
-  const nInactive = services.filter(s => s.state !== ServiceState.Active && s.state !== ServiceState.Failed).length;
-  const nProblematic = nFailed + nInactive;
-  const total = services.length;
+  var ARROW = '<span class="details-arrow" style="display:inline-flex;align-items:center;flex-shrink:0;margin-right:4px"><svg width="7" height="7" viewBox="0 0 6 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4-4 4" stroke="var(--color-text-subdue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
+  var ServiceState     = { Active: 0, Inactive: 1, Failed: 2, Activating: 3, Deactivating: 4, Reloading: 5 };
+  var ServiceStateName = { 0: 'active', 1: 'inactive', 2: 'failed', 3: 'activating', 4: 'deactivating', 5: 'reloading' };
+  var ServiceSubName   = { 0: 'dead', 1: 'running', 2: 'exited', 3: 'failed', 4: 'unknown' };
+
+  function fmtBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(1024));
+    var val = bytes / Math.pow(1024, i);
+    return val.toFixed(val < 10 ? 1 : 0) + ' ' + units[i];
+  }
+
+  var nFailed      = services.filter(function(s) { return s.state === ServiceState.Failed; }).length;
+  var nInactive    = services.filter(function(s) { return s.state !== ServiceState.Active && s.state !== ServiceState.Failed; }).length;
+  var nProblematic = nFailed + nInactive;
+  var total        = services.length;
 %>
 <details class="bz" style="width:100%">
   <summary class="bz-sum" style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer">
@@ -25,12 +38,12 @@
 
       <%# Rows -%>
       <% services.forEach(function(svc) {
-        const isFailed = svc.state === ServiceState.Failed;
-        const isActive = svc.state === ServiceState.Active;
-        const stateColor = isFailed ? 'var(--color-negative)' : (isActive ? 'var(--color-positive)' : 'var(--color-text-subdue)');
-        const stateName  = ServiceStateName[svc.state] || String(svc.state);
-        const subName    = ServiceSubName[svc.sub] || '';
-        const stateLabel = subName ? stateName + '/' + subName : stateName;
+        var isFailed   = svc.state === ServiceState.Failed;
+        var isActive   = svc.state === ServiceState.Active;
+        var stateColor = isFailed ? 'var(--color-negative)' : (isActive ? 'var(--color-positive)' : 'var(--color-text-subdue)');
+        var stateName  = ServiceStateName[svc.state] || String(svc.state);
+        var subName    = ServiceSubName[svc.sub] || '';
+        var stateLabel = subName ? stateName + '/' + subName : stateName;
       %>
       <%# Cell 1: badge + name + state -%>
       <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden">

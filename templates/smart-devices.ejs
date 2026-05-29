@@ -1,5 +1,15 @@
 <%# Smart devices / disks partial — expects: disks (SmartDeviceRecord[]) -%>
-<%- include('_helpers') -%>
+<%
+  var ARROW = '<span class="details-arrow" style="display:inline-flex;align-items:center;flex-shrink:0;margin-right:4px"><svg width="7" height="7" viewBox="0 0 6 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4-4 4" stroke="var(--color-text-subdue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
+  function fmtBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(1024));
+    var val = bytes / Math.pow(1024, i);
+    return val.toFixed(val < 10 ? 1 : 0) + ' ' + units[i];
+  }
+%>
 <details class="bz" style="width:100%">
   <summary class="bz-sum" style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer">
     <%- ARROW %>
@@ -15,11 +25,11 @@
 
       <%# Rows -%>
       <% disks.forEach(function(d) {
-        const passed      = /passed/i.test(d.state);
-        const isFailed    = /failed/i.test(d.state);
-        const badgeColor  = isFailed ? 'var(--color-negative)' : (passed ? 'var(--color-positive)' : 'var(--color-subdue)');
-        const stateColor  = isFailed ? 'var(--color-negative)' : (passed ? 'var(--color-positive)' : 'var(--color-text-subdue)');
-        const ageYears    = d.hours ? Math.round((d.hours / 24 / 365.25) * 10) / 10 : null;
+        var passed     = /passed/i.test(d.state);
+        var isFailed   = /failed/i.test(d.state);
+        var badgeColor = isFailed ? 'var(--color-negative)' : (passed ? 'var(--color-positive)' : 'var(--color-subdue)');
+        var stateColor = isFailed ? 'var(--color-negative)' : (passed ? 'var(--color-positive)' : 'var(--color-text-subdue)');
+        var ageYears   = d.hours ? Math.round((d.hours / 24 / 365.25) * 10) / 10 : null;
       %>
       <%# Cell 1: badge + name + state/model -%>
       <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden">
