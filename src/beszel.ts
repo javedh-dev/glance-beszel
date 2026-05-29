@@ -203,17 +203,24 @@ export class BeszelClient {
       }
     }
 
+    const t0 = Date.now();
     const res = await fetch(url.toString(), {
       headers: { Authorization: this.token! },
       signal: this.makeSignal(),
     });
+    const elapsed = Date.now() - t0;
 
+    const label = params?.filter ? `${path} filter=${params.filter}` : path;
     if (!res.ok) {
       const text = await res.text();
+      console.error(`[beszel] ${label} → ${res.status} (${elapsed}ms)`);
       throw new Error(`Beszel API error (${res.status}) ${path}: ${text}`);
     }
 
-    return res.json() as Promise<T>;
+    const data = await res.json() as T;
+    const count = (data as { items?: unknown[] }).items?.length ?? "–";
+    console.log(`[beszel] ${label} → ${res.status} ${elapsed}ms (${count} items)`);
+    return data;
   }
 
   async getSystems(filter?: string): Promise<SystemRecord[]> {

@@ -139,25 +139,35 @@ async function fetchWidget(
   qCollapseAfter: number,
   iconMap: Map<string, string>,
 ): Promise<string> {
-  const [systems, alerts, detailsMap] = await Promise.all([
-    client.getSystems(filter),
-    SHOW_ALERTS ? client.getAlerts(true) : Promise.resolve([]),
-    client.getSystemDetails(),
-  ]);
+  const t0 = Date.now();
 
-  const bundles: SystemBundle[] = await Promise.all(
-    systems.map(async (system): Promise<SystemBundle> => {
-      if (system.status !== "up") {
-        return { system, details: detailsMap.get(system.id), containers: [], services: [], smartDevices: [] };
-      }
-      const [containers, services, smartDevices] = await Promise.all([
-        client.getContainersForSystem(system.id),
-        client.getServicesForSystem(system.id),
-        client.getSmartDevicesForSystem(system.id),
-      ]);
-      return { system, details: detailsMap.get(system.id), containers, services, smartDevices };
-    }),
-  );
+  // Start alerts and system_details immediately — they have no dependencies.
+  const alertsPromise = SHOW_ALERTS ? client.getAlerts(true) : Promise.resolve([]);
+  const detailsPromise = client.getSystemDetails();
+
+  // Fetch systems; as soon as we have IDs, fire all per-system calls in parallel
+  // without waiting for alerts/details to finish.
+  const systems = await client.getSystems(filter);
+
+  const bundlePromises = systems.map(async (system): Promise<SystemBundle> => {
+    const details = detailsPromise.then((m) => m.get(system.id));
+    if (system.status !== "up") {
+      return { system, details: await details, containers: [], services: [], smartDevices: [] };
+    }
+    const [resolvedDetails, containers, services, smartDevices] = await Promise.all([
+      details,
+      client.getContainersForSystem(system.id),
+      client.getServicesForSystem(system.id),
+      client.getSmartDevicesForSystem(system.id),
+    ]);
+    return { system, details: resolvedDetails, containers, services, smartDevices };
+  });
+
+  // Wait for everything to settle
+  const [bundles, alerts] = await Promise.all([
+    Promise.all(bundlePromises),
+    alertsPromise,
+  ]);
 
   const orderList = qOrder
     ? qOrder.split(",").map((n) => n.trim().toLowerCase()).filter(Boolean)
@@ -184,7 +194,9 @@ async function fetchWidget(
     iconMap,
   };
 
-  return renderWidget(bundles, alerts, opts);
+  const html = renderWidget(bundles, alerts, opts);
+  console.log(`[widget] fetch complete in ${Date.now() - t0}ms (${bundles.length} systems)`);
+  return html;
 }
 
 app.get("/", async (req: Request, res: Response) => {
