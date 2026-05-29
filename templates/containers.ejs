@@ -1,7 +1,5 @@
-<%# Containers partial — expects: containers (ContainerRecord[]) -%>
+<%# Containers partial — expects: containers (ContainerRecord[]), icons -%>
 <%
-  var ARROW = '<span class="details-arrow" style="display:inline-flex;align-items:center;flex-shrink:0;margin-right:4px"><svg width="7" height="7" viewBox="0 0 6 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4-4 4" stroke="var(--color-text-subdue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
-
   function fmtMB(mb) {
     if (!mb || mb === 0) return '0 MB';
     if (mb >= 1024) return (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + ' GB';
@@ -19,7 +17,8 @@
 %>
 <details class="bz" style="width:100%">
   <summary class="bz-sum" style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer">
-    <%- ARROW %>
+    <%- icons.ChevronRight %>
+    <span style="display:inline-flex;color:var(--color-text-subdue)"><%- icons.Box %></span>
     <span style="font-size:var(--font-size-h5);color:var(--color-text-subdue);text-transform:uppercase;letter-spacing:.05em">Docker</span>
     <% if (nProblematic === 0) { %>
       <span style="font-size:var(--font-size-h5);color:var(--color-positive);margin-left:4px"><%= total %> running</span>
@@ -39,21 +38,22 @@
       <% containers.forEach(function(c) {
         var isRunning   = /^up/i.test(c.status);
         var isUnhealthy = c.health === 3;
-        var badgeColor  = isUnhealthy ? 'var(--color-negative)' : (isRunning ? 'var(--color-positive)' : 'var(--color-text-subdue)');
+        var stateColor  = isUnhealthy ? 'var(--color-negative)' : (isRunning ? 'var(--color-positive)' : 'var(--color-text-subdue)');
+        var stateIcon   = isUnhealthy ? icons.CircleX : (isRunning ? icons.CircleCheck : icons.CircleMinus);
         var stateLabel  = isUnhealthy ? 'unhealthy' : c.status;
         var raw         = c.image || '';
         var colonIdx    = raw.lastIndexOf(':');
         var imageTag    = fmtTag(colonIdx > 0 ? raw.slice(colonIdx + 1) : '');
       %>
 
-      <%# Cell 1: badge · name · tag · state -%>
+      <%# Cell 1: status icon · name · tag · state -%>
       <div style="display:flex;align-items:center;gap:6px;min-width:0">
-        <span style="display:inline-block;flex-shrink:0;min-width:10px;width:10px;height:10px;border-radius:3px;background:<%= badgeColor %>"></span>
+        <span style="display:inline-flex;flex-shrink:0;color:<%= stateColor %>"><%- stateIcon %></span>
         <span style="font-size:var(--font-size-h5);color:var(--color-text-highlight);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1;min-width:0"><%= c.name %></span>
         <% if (imageTag) { %>
           <span style="font-size:var(--font-size-h5);color:var(--color-text-subdue);white-space:nowrap;flex-shrink:0"><%= imageTag %></span>
         <% } %>
-        <span class="bz-svc-state-text" style="font-size:var(--font-size-h5);color:<%= badgeColor %>;white-space:nowrap;flex-shrink:0;margin-left:auto"><%= stateLabel %></span>
+        <span class="bz-svc-state-text" style="font-size:var(--font-size-h5);color:<%= stateColor %>;white-space:nowrap;flex-shrink:0;margin-left:auto"><%= stateLabel %></span>
       </div>
 
       <%# Cell 2: CPU -%>

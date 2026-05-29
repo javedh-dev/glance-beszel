@@ -111,6 +111,23 @@ export interface SmartDeviceRecord {
   updated: string;
 }
 
+// system_details collection — one record per system (id matches system id)
+export interface SystemDetailsRecord {
+  id: string;       // same as system id
+  system: string;   // system id
+  hostname: string;
+  os: number;       // 0=Linux, 1=macOS, 2=Windows (future)
+  os_name: string;  // e.g. "Debian GNU/Linux 13 (trixie)", "macOS 15.5"
+  kernel: string;
+  arch: string;
+  cpu: string;      // CPU model string
+  cores: number;
+  threads: number;
+  memory: number;   // bytes
+  podman: boolean;
+  updated: string;
+}
+
 export interface PocketBaseAuthResponse {
   token: string;
   record: {
@@ -255,6 +272,22 @@ export class BeszelClient {
       return data.items;
     } catch {
       return [];
+    }
+  }
+
+  async getSystemDetails(): Promise<Map<string, SystemDetailsRecord>> {
+    try {
+      const data = await this.get<PocketBaseList<SystemDetailsRecord>>(
+        "/api/collections/system_details/records",
+        { perPage: "200" }
+      );
+      const map = new Map<string, SystemDetailsRecord>();
+      for (const d of data.items) {
+        map.set(d.system, d);
+      }
+      return map;
+    } catch {
+      return new Map();
     }
   }
 }

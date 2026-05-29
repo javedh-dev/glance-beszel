@@ -25,23 +25,67 @@ const beszelConfig: BeszelConfig = {
 };
 
 const PORT = parseInt(optionalEnv("PORT", "8088"), 10);
-const WIDGET_TITLE = optionalEnv("WIDGET_TITLE", "Homelab");
+const WIDGET_TITLE = optionalEnv("WIDGET_TITLE", "Beszel");
 const WIDGET_TITLE_URL = optionalEnv("WIDGET_TITLE_URL", beszelConfig.url);
 const SHOW_ALERTS = optionalEnv("SHOW_ALERTS", "true") === "true";
 const SYSTEM_FILTER = optionalEnv("SYSTEM_FILTER", "");
 const STATUS_FILTER = optionalEnv("STATUS_FILTER", "");
-// How many systems (from the top of the sorted list) start expanded. 0 = all collapsed.
+const SYSTEM_ORDER = optionalEnv("SYSTEM_ORDER", "");
+// How many systems start expanded from the top. 0 = all collapsed.
 const COLLAPSE_AFTER = parseInt(optionalEnv("COLLAPSE_AFTER", "0"), 10);
 
-// ---- Build effective filter ----
+// Supported icon category keys and their env var names
+const ICON_KEYS = [
+  "proxmox",
+  "vm",
+  "lxc",
+  "rpi",
+  "nas",
+  "docker",
+  "windows",
+  "mac",
+  "linux",
+] as const;
+type IconKey = (typeof ICON_KEYS)[number];
 
-function buildFilter(systemFilter: string, statusFilter: string): string | undefined {
+// Env-level icon assignments: ICON_PROXMOX=host1,host2  ICON_VM=host3 ...
+const ICON_ENV: Partial<Record<IconKey, string>> = {};
+for (const key of ICON_KEYS) {
+  const val = optionalEnv(`ICON_${key.toUpperCase()}`, "");
+  if (val) ICON_ENV[key] = val;
+}
+
+// Build a map of system-name (lowercase) → icon category key from comma-separated lists
+function buildIconMap(
+  overrides: Partial<Record<IconKey, string>>,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const key of ICON_KEYS) {
+    const val = overrides[key];
+    if (!val) continue;
+    for (const name of val
+      .split(",")
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean)) {
+      map.set(name, key);
+    }
+  }
+  return map;
+}
+
+// ---- Build PocketBase filter string ----
+
+function buildFilter(
+  systemFilter: string,
+  statusFilter: string,
+): string | undefined {
   const parts: string[] = [];
 
-  // systemFilter: comma-separated names → name="a" || name="b" || ...
-  // Falls back to raw PocketBase expression if no commas and contains operators
   if (systemFilter) {
-    const names = systemFilter.split(",").map((n) => n.trim()).filter(Boolean);
+    const names = systemFilter
+      .split(",")
+      .map((n) => n.trim())
+      .filter(Boolean);
     if (names.length === 1 && /[=~<>()&|]/.test(names[0])) {
       parts.push(`(${names[0]})`);
     } else {
@@ -60,44 +104,88 @@ const client = new BeszelClient(beszelConfig);
 
 app.get("/", async (req: Request, res: Response) => {
   try {
-    // Query params override env defaults, allowing per-widget config in Glance:
-    //   url: http://localhost:8088/?systems=pbs,nexus&status=up&collapse_after=3
-    const qSystems      = (req.query.systems       as string | undefined) ?? SYSTEM_FILTER;
-    const qStatus       = (req.query.status        as string | undefined) ?? STATUS_FILTER;
-    const qCollapseAfter = req.query.collapse_after !== undefined
-      ? parseInt(req.query.collapse_after as string, 10)
-      : COLLAPSE_AFTER;
+    // Query params override env defaults, allowing per-widget config in glance.yml:
+    //   url: http://localhost:8088/?systems=pbs,nexus&status=up&order=nexus,pbs&collapse_after=3
+    const qSystems = (req.query.systems as string | undefined) ?? SYSTEM_FILTER;
+    const qStatus = (req.query.status as string | undefined) ?? STATUS_FILTER;
+    const qOrder = (req.query.order as string | undefined) ?? SYSTEM_ORDER;
+    const qCollapseAfter =
+      req.query.collapse_after !== undefined
+        ? parseInt(req.query.collapse_after as string, 10)
+        : COLLAPSE_AFTER;
+
+    // Per-request icon overrides merge on top of env-level ones.
+    // Query params: icon_proxmox=host1,host2&icon_vm=host3 etc.
+    const reqIconOverrides: Partial<Record<IconKey, string>> = { ...ICON_ENV };
+    for (const key of ICON_KEYS) {
+      const qval = req.query[`icon_${key}`] as string | undefined;
+      if (qval) reqIconOverrides[key] = qval;
+    }
+    const iconMap = buildIconMap(reqIconOverrides);
 
     const filter = buildFilter(qSystems, qStatus);
-    const [systems, alerts] = await Promise.all([
+    const [systems, alerts, detailsMap] = await Promise.all([
       client.getSystems(filter),
       SHOW_ALERTS ? client.getAlerts() : Promise.resolve([]),
+      client.getSystemDetails(),
     ]);
 
     // Fetch per-system detail data in parallel
     const bundles: SystemBundle[] = await Promise.all(
       systems.map(async (system): Promise<SystemBundle> => {
         if (system.status !== "up") {
-          return { system, containers: [], services: [], smartDevices: [] };
+          return {
+            system,
+            details: detailsMap.get(system.id),
+            containers: [],
+            services: [],
+            smartDevices: [],
+          };
         }
         const [containers, services, smartDevices] = await Promise.all([
           client.getContainersForSystem(system.id),
           client.getServicesForSystem(system.id),
           client.getSmartDevicesForSystem(system.id),
         ]);
-        return { system, containers, services, smartDevices };
+        return {
+          system,
+          details: detailsMap.get(system.id),
+          containers,
+          services,
+          smartDevices,
+        };
       }),
     );
 
-    // Sort: errored (down/paused) → no nested detail → has nested detail
-    // Within each tier: alphabetical by name
-    function sortTier(b: SystemBundle): number {
-      if (b.system.status !== "up") return 0;
-      const hasDetails = b.containers.length > 0 || b.services.length > 0 || b.smartDevices.length > 0;
-      return hasDetails ? 2 : 1;
-    }
+    // Sort bundles.
+    // If an explicit order list is given (comma-separated names), those systems appear
+    // first in that order (case-insensitive). Systems not in the list follow alphabetically.
+    // Without an order list: down/paused → bare up → up with details, then alpha within tier.
+    const orderList = qOrder
+      ? qOrder
+          .split(",")
+          .map((n) => n.trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+
     bundles.sort((a, b) => {
-      const td = sortTier(a) - sortTier(b);
+      if (orderList.length > 0) {
+        const ai = orderList.indexOf(a.system.name.toLowerCase());
+        const bi = orderList.indexOf(b.system.name.toLowerCase());
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.system.name.localeCompare(b.system.name);
+      }
+      function tier(bnd: SystemBundle): number {
+        if (bnd.system.status !== "up") return 0;
+        return bnd.containers.length > 0 ||
+          bnd.services.length > 0 ||
+          bnd.smartDevices.length > 0
+          ? 2
+          : 1;
+      }
+      const td = tier(a) - tier(b);
       if (td !== 0) return td;
       return a.system.name.localeCompare(b.system.name);
     });
@@ -106,6 +194,7 @@ app.get("/", async (req: Request, res: Response) => {
       beszelUrl: WIDGET_TITLE_URL,
       showAlerts: SHOW_ALERTS,
       collapseAfter: qCollapseAfter,
+      iconMap,
     };
 
     const html = renderWidget(bundles, alerts, opts);
@@ -140,6 +229,7 @@ app.listen(PORT, () => {
   console.log(`  Show alerts:  ${SHOW_ALERTS}`);
   if (SYSTEM_FILTER) console.log(`  System filter: ${SYSTEM_FILTER}`);
   if (STATUS_FILTER) console.log(`  Status filter: ${STATUS_FILTER}`);
+  if (SYSTEM_ORDER) console.log(`  System order:  ${SYSTEM_ORDER}`);
 });
 
 function escHtml(str: string): string {

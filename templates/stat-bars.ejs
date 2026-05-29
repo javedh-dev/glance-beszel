@@ -1,4 +1,4 @@
-<%# Stat bars partial — expects: cpuPct, memPct, diskPct (numbers 0-100) -%>
+<%# Stat bars partial — expects: cpuPct, memPct, diskPct (0-100), icons -%>
 <%
   function barBg(p) {
     return p >= 85
@@ -6,21 +6,22 @@
       : 'var(--color-progress-value)';
   }
   const bars = [
-    { label: 'CPU',  pct: cpuPct  },
-    { label: 'RAM',  pct: memPct  },
-    { label: 'DISK', pct: diskPct },
+    { icon: icons.Cpu,         label: 'CPU',  pct: cpuPct  },
+    { icon: icons.MemoryStick, label: 'RAM',  pct: memPct  },
+    { icon: icons.Database,    label: 'DISK', pct: diskPct },
   ];
 %>
-<div class="bz-row2" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px">
+<div class="bz-row2">
 <% bars.forEach(function(b) {
   const p = Math.max(0, Math.min(100, Math.round(b.pct)));
 %>
-  <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:0">
-    <div style="display:flex;justify-content:space-between;align-items:baseline">
-      <span style="font-size:var(--font-size-h6);color:var(--color-text-subdue)"><%= b.label %></span>
-      <span style="font-size:var(--font-size-h6);color:var(--color-text-highlight)"><%= p %>%</span>
+  <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+    <%# icon + pct on one line, label omitted to save space -%>
+    <div style="display:flex;align-items:center;gap:4px;white-space:nowrap">
+      <span style="display:inline-flex;flex-shrink:0;color:var(--color-text-subdue)"><%- b.icon %></span>
+      <span style="font-size:var(--font-size-h6);color:var(--color-text-highlight);flex-shrink:0"><%= p %>%</span>
     </div>
-    <div style="height:6px;border:1px solid var(--color-progress-border);border-radius:var(--border-radius);padding:1px;overflow:hidden">
+    <div style="height:7px;border:1px solid var(--color-progress-border);border-radius:var(--border-radius);overflow:hidden">
       <div style="height:100%;width:<%= p %>%;min-width:<%= p > 0 ? '2px' : '0' %>;background:<%= barBg(p) %>;border-radius:calc(var(--border-radius)/2)"></div>
     </div>
   </div>

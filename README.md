@@ -64,7 +64,7 @@ All configuration is done via environment variables.
 | `BESZEL_EMAIL`    | **yes**  | —                    | Beszel user email |
 | `BESZEL_PASSWORD` | **yes**  | —                    | Beszel user password |
 | `PORT`            | no       | `8088`               | Port the extension listens on |
-| `WIDGET_TITLE`    | no       | `Homelab`            | Title shown in the Glance widget header |
+| `WIDGET_TITLE`    | no       | `Beszel`            | Title shown in the Glance widget header |
 | `WIDGET_TITLE_URL`| no       | `$BESZEL_URL`        | URL the widget title links to |
 | `SHOW_SUMMARY`    | no       | `true`               | Show the top summary stats bar |
 | `SHOW_ALERTS`     | no       | `true`               | Show triggered alert banner |

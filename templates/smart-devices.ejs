@@ -1,7 +1,5 @@
-<%# Smart devices / disks partial — expects: disks (SmartDeviceRecord[]) -%>
+<%# Smart devices / disks partial — expects: disks (SmartDeviceRecord[]), icons -%>
 <%
-  var ARROW = '<span class="details-arrow" style="display:inline-flex;align-items:center;flex-shrink:0;margin-right:4px"><svg width="7" height="7" viewBox="0 0 6 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4-4 4" stroke="var(--color-text-subdue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
-
   function fmtBytes(bytes) {
     if (!bytes || bytes === 0) return '0 B';
     var units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -12,7 +10,8 @@
 %>
 <details class="bz" style="width:100%">
   <summary class="bz-sum" style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer">
-    <%- ARROW %>
+    <%- icons.ChevronRight %>
+    <span style="display:inline-flex;color:var(--color-text-subdue)"><%- icons.HardDrive %></span>
     <span style="font-size:var(--font-size-h5);color:var(--color-text-subdue);text-transform:uppercase;letter-spacing:.05em">Disks</span>
     <span style="font-size:var(--font-size-h5);color:var(--color-text-subdue);margin-left:4px"><%= disks.length %></span>
   </summary>
@@ -27,13 +26,13 @@
       <% disks.forEach(function(d) {
         var passed     = /passed/i.test(d.state);
         var isFailed   = /failed/i.test(d.state);
-        var badgeColor = isFailed ? 'var(--color-negative)' : (passed ? 'var(--color-positive)' : 'var(--color-subdue)');
         var stateColor = isFailed ? 'var(--color-negative)' : (passed ? 'var(--color-positive)' : 'var(--color-text-subdue)');
+        var stateIcon  = isFailed ? icons.CircleX : (passed ? icons.CircleCheck : icons.CircleMinus);
         var ageYears   = d.hours ? Math.round((d.hours / 24 / 365.25) * 10) / 10 : null;
       %>
-      <%# Cell 1: badge + name + state/model -%>
+      <%# Cell 1: status icon + name + state/model -%>
       <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden">
-        <div style="flex-shrink:0;width:10px;height:10px;border-radius:3px;background:<%= badgeColor %>"></div>
+        <span style="display:inline-flex;flex-shrink:0;color:<%= stateColor %>"><%- stateIcon %></span>
         <span style="font-size:var(--font-size-h5);color:var(--color-text-highlight);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1"><%= d.name %><% if (d.model) { %> <span style="color:var(--color-text-subdue)">(<%= d.model %>)</span><% } %></span>
         <span class="bz-svc-state-text" style="font-size:var(--font-size-h5);color:<%= stateColor %>;white-space:nowrap;flex-shrink:0;margin-left:auto"><%= d.state || '—' %><% if (ageYears !== null) { %> &middot; <%= ageYears %>yr<% } %></span>
       </div>

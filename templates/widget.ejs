@@ -20,7 +20,7 @@
     .bz-li-row{
       cursor:pointer;
       display:grid;
-      grid-template-columns:minmax(0,18rem) 1fr 5rem;
+      grid-template-columns:minmax(0,1fr) minmax(0,26rem) 5rem;
       align-items:center;
       column-gap:12px;
       padding:6px 0;
@@ -35,8 +35,7 @@
       color:var(--color-text-subdue);white-space:nowrap;
     }
     .bz-li-body{padding-left:20px}
-    /* stat bars 3-across on wide */
-    .bz-bars-wide .bz-row2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px 12px}
+    .bz-bars-wide .bz-row2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
   }
 
   /* ── Narrow (<600px): single-row header, bars in body ── */
@@ -57,8 +56,7 @@
     .bz-bars-narrow{display:block}
     .bz-uptime-wide{display:none}
     .bz-li-body{padding-left:14px}
-    /* stat bars 3-across on medium narrow */
-    .bz-bars-narrow .bz-row2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+    .bz-bars-narrow .bz-row2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
   }
 
   /* ── Very narrow (<380px): tighten padding only ── */
@@ -68,7 +66,7 @@
 </style>
 
 <% if (showAlerts && triggeredAlerts.length > 0) { %>
-  <%- include('alert-banner', { alerts: triggeredAlerts }) %>
+  <%- include('alert-banner', { alerts: triggeredAlerts, icons }) %>
 <% } %>
 
 <div class="bz-root">
@@ -77,7 +75,7 @@
 <% } else { %>
   <ul class="list collapsible-container"<% if (collapseAfter > 0) { %> data-collapse-after="<%= collapseAfter %>"<% } %>>
 <% bundles.forEach(function(bundle) { %>
-    <li class="bz-li"><%- include('system-entry', { bundle: bundle, beszelUrl: beszelUrl }) %></li>
+    <li class="bz-li"><%- include('system-entry', { bundle: bundle, beszelUrl: beszelUrl, icons: icons, resolveSystemIcon: resolveSystemIcon }) %></li>
 <% }); %>
   </ul>
 <% } %>
