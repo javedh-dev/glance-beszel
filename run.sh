@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run.sh — Run the Glance Beszel extension without Docker
+# run.sh — Install, build, and start the Glance Beszel extension locally (no Docker)
 # Usage: ./run.sh
 # Reads configuration from .env in the same directory.
 
@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Load .env if present (for shell-level validation below)
+# Load .env if present
 if [ -f .env ]; then
   set -o allexport
   source .env
@@ -22,16 +22,16 @@ fi
 : "${BESZEL_EMAIL:?BESZEL_EMAIL is required — set it in .env}"
 : "${BESZEL_PASSWORD:?BESZEL_PASSWORD is required — set it in .env}"
 
-# Install deps if needed
+# Install dependencies if needed
 if [ ! -d node_modules ]; then
   echo "Installing dependencies..."
-  pnpm install
+  npm install
 fi
 
-# Build if dist is missing or sources are newer
+# Build TypeScript → dist/ if missing or sources are newer
 if [ ! -d dist ] || [ src -nt dist ]; then
   echo "Building TypeScript..."
-  pnpm run build
+  npm run build
 fi
 
 echo "Starting Glance Beszel extension on port ${PORT:-8088}..."

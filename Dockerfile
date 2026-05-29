@@ -3,8 +3,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json tsconfig.json ./
-RUN npm install
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci
 
 COPY src ./src
 RUN npm run build
@@ -16,10 +16,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY templates ./templates
 
 # Default port; override with PORT env var
 EXPOSE 8088

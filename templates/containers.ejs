@@ -1,7 +1,6 @@
 <%# Containers partial — expects: containers (ContainerRecord[]) -%>
+<%- include('_helpers') -%>
 <%
-  const ARROW = '<span class="details-arrow" style="display:inline-flex;align-items:center;flex-shrink:0;margin-right:4px"><svg width="7" height="7" viewBox="0 0 6 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4-4 4" stroke="var(--color-text-subdue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
-
   function fmtMB(mb) {
     if (!mb || mb === 0) return '0 MB';
     if (mb >= 1024) return (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + ' GB';
