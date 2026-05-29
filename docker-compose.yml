@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  glance-beszel:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8088}:${PORT:-8088}"
+    env_file:
+      - .env

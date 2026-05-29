@@ -1,0 +1,97 @@
+<%# System entry partial — expects: bundle (SystemBundle), beszelUrl (string) -%>
+<%
+  const s = bundle.system;
+  const info = s.info || {};
+  const isUp = s.status === 'up';
+
+  const ARROW = '<span class="details-arrow" style="display:inline-flex;align-items:center;flex-shrink:0;margin-right:4px"><svg width="7" height="7" viewBox="0 0 6 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4-4 4" stroke="var(--color-text-subdue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
+  const statusColor = isUp ? 'var(--color-positive)' : (s.status === 'paused' ? 'var(--color-subdue)' : 'var(--color-negative)');
+  const statusPath  = isUp
+    ? 'M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z'
+    : s.status === 'paused'
+      ? 'M2 10a8 8 0 1 1 16 0A8 8 0 0 1 2 10Zm5-1.25a.75.75 0 0 1 .75-.75h.5a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1-.75-.75v-2.5Zm4 0a.75.75 0 0 1 .75-.75h.5a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1-.75-.75v-2.5Z'
+      : 'M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z';
+%>
+
+<% if (!isUp) { %>
+
+<%# ── Down / paused: simple single row, no expand ── -%>
+<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+  <svg fill="<%= statusColor %>" width="20" height="20" style="width:20px;height:20px;flex-shrink:0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+    <path fill-rule="evenodd" d="<%= statusPath %>" clip-rule="evenodd"/>
+  </svg>
+  <span class="color-highlight size-h4"><%= s.name %></span>
+  <span class="color-subdue size-h5" style="margin-left:auto"><%= s.status === 'paused' ? 'paused' : 'unreachable' %></span>
+</div>
+
+<% } else {
+  const cpuPct   = Math.round(info.cpu || 0);
+  const memPct   = Math.round(info.mp  || 0);
+  const diskPct  = Math.round(info.dp  || 0);
+  const uptime   = info.u || info.t || 0;
+  const svFailed = (info.sv && info.sv[1]) || 0;
+
+  function fmtUptime(sec) {
+    if (!sec) return '';
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'm';
+    return m + 'm';
+  }
+  const uptimeStr = fmtUptime(uptime);
+%>
+
+<%# ── Header row: always clickable to toggle expand ── -%>
+<div class="bz-li-row" onclick="this.closest('.bz-li').toggleAttribute('data-open')">
+
+  <%# Col 1 (all sizes): arrow + icon + name + narrow-only uptime -%>
+  <div class="bz-name-col">
+    <%- ARROW %>
+    <svg fill="<%= statusColor %>" width="20" height="20" style="width:20px;height:20px;flex-shrink:0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+      <path fill-rule="evenodd" d="<%= statusPath %>" clip-rule="evenodd"/>
+    </svg>
+    <span class="color-highlight size-h4" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0"><%= s.name %></span>
+    <%# Uptime + alert badge — shown inline on narrow, hidden on wide -%>
+    <div class="bz-row1-right">
+      <% if (uptimeStr) { %><span><%= uptimeStr %></span><% } %>
+      <% if (svFailed > 0) { %><span style="color:var(--color-negative)"><%= svFailed %>&#9888;</span><% } %>
+    </div>
+  </div>
+
+  <%# Col 2 (wide only): stat bars -%>
+  <div class="bz-bars-wide">
+    <%- include('stat-bars', { cpuPct, memPct, diskPct }) %>
+  </div>
+
+  <%# Col 3 (wide only): uptime right-aligned -%>
+  <div class="bz-uptime-wide">
+    <% if (uptimeStr) { %><span><%= uptimeStr %></span><% } %>
+    <% if (svFailed > 0) { %><span style="color:var(--color-negative)"><%= svFailed %>&#9888;</span><% } %>
+  </div>
+
+</div>
+
+<%# ── Expanded body ── -%>
+<div class="bz-li-body">
+
+  <%# Stat bars — narrow only (wide shows them in the header row) -%>
+  <div class="bz-bars-narrow">
+    <%- include('stat-bars', { cpuPct, memPct, diskPct }) %>
+  </div>
+
+  <% if (bundle.containers.length > 0) { %>
+    <%- include('containers', { containers: bundle.containers }) %>
+  <% } %>
+  <% if (bundle.services.length > 0) { %>
+    <%- include('services', { services: bundle.services }) %>
+  <% } %>
+  <% if (bundle.smartDevices.length > 0) { %>
+    <%- include('smart-devices', { disks: bundle.smartDevices }) %>
+  <% } %>
+
+</div>
+
+<% } /* end isUp */ %>

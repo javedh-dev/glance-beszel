@@ -1,0 +1,28 @@
+<%# Stat bars partial — expects: cpuPct, memPct, diskPct (numbers 0-100) -%>
+<%
+  function barBg(p) {
+    return p >= 85
+      ? 'linear-gradient(to right,var(--color-progress-value) 65%,var(--color-negative))'
+      : 'var(--color-progress-value)';
+  }
+  const bars = [
+    { label: 'CPU',  pct: cpuPct  },
+    { label: 'RAM',  pct: memPct  },
+    { label: 'DISK', pct: diskPct },
+  ];
+%>
+<div class="bz-row2" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px">
+<% bars.forEach(function(b) {
+  const p = Math.max(0, Math.min(100, Math.round(b.pct)));
+%>
+  <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:0">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:var(--font-size-h6);color:var(--color-text-subdue)"><%= b.label %></span>
+      <span style="font-size:var(--font-size-h6);color:var(--color-text-highlight)"><%= p %>%</span>
+    </div>
+    <div style="height:6px;border:1px solid var(--color-progress-border);border-radius:var(--border-radius);padding:1px;overflow:hidden">
+      <div style="height:100%;width:<%= p %>%;min-width:<%= p > 0 ? '2px' : '0' %>;background:<%= barBg(p) %>;border-radius:calc(var(--border-radius)/2)"></div>
+    </div>
+  </div>
+<% }); %>
+</div>

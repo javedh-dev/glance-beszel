@@ -1,0 +1,69 @@
+<%# Containers partial — expects: containers (ContainerRecord[]) -%>
+<%
+  const ARROW = '<span class="details-arrow" style="display:inline-flex;align-items:center;flex-shrink:0;margin-right:4px"><svg width="7" height="7" viewBox="0 0 6 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4-4 4" stroke="var(--color-text-subdue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
+  function fmtMB(mb) {
+    if (!mb || mb === 0) return '0 MB';
+    if (mb >= 1024) return (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + ' GB';
+    return Math.round(mb) + ' MB';
+  }
+
+  // Truncate SHA digests to 12 chars, leave normal tags as-is
+  function fmtTag(tag) {
+    if (!tag) return '';
+    if (/^[a-f0-9]{12,}$/i.test(tag)) return tag.slice(0, 12) + '…';
+    return tag;
+  }
+%>
+<%
+  const nProblematic = containers.filter(c => c.health === 3 || !/^up/i.test(c.status)).length;
+  const total = containers.length;
+%>
+<details class="bz" style="width:100%">
+  <summary class="bz-sum" style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer">
+    <%- ARROW %>
+    <span style="font-size:var(--font-size-h5);color:var(--color-text-subdue);text-transform:uppercase;letter-spacing:.05em">Docker</span>
+    <% if (nProblematic === 0) { %>
+      <span style="font-size:var(--font-size-h5);color:var(--color-positive);margin-left:4px"><%= total %> running</span>
+    <% } else { %>
+      <span style="font-size:var(--font-size-h5);color:var(--color-negative);margin-left:4px"><%= nProblematic %> issue<%= nProblematic !== 1 ? 's' : '' %></span>
+      <span style="font-size:var(--font-size-h5);color:var(--color-text-subdue)"> / <%= total %></span>
+    <% } %>
+  </summary>
+  <div style="margin-top:6px;padding-left:14px">
+    <div style="display:grid;grid-template-columns:1fr 3.5rem 4.5rem;gap:4px 12px;align-items:center">
+      <%# Header -%>
+      <div style="font-size:var(--font-size-h5);color:var(--color-text-subdue);padding-bottom:3px">NAME</div>
+      <div style="font-size:var(--font-size-h5);color:var(--color-text-subdue);padding-bottom:3px;text-align:right">CPU</div>
+      <div style="font-size:var(--font-size-h5);color:var(--color-text-subdue);padding-bottom:3px;text-align:right">MEM</div>
+
+      <%# Data rows — 3 direct grid children per container -%>
+      <% containers.forEach(function(c) {
+        const isRunning   = /^up/i.test(c.status);
+        const isUnhealthy = c.health === 3;
+        const badgeColor  = isUnhealthy ? 'var(--color-negative)' : (isRunning ? 'var(--color-positive)' : 'var(--color-text-subdue)');
+        const stateLabel  = isUnhealthy ? 'unhealthy' : c.status;
+        const raw = c.image || '';
+        const colonIdx = raw.lastIndexOf(':');
+        const imageTag = fmtTag(colonIdx > 0 ? raw.slice(colonIdx + 1) : '');
+      %>
+
+      <%# Cell 1: badge · name · tag (narrow) · state text (wide only) -%>
+      <div style="display:flex;align-items:center;gap:6px;min-width:0">
+        <span style="display:inline-block;flex-shrink:0;min-width:10px;width:10px;height:10px;border-radius:3px;background:<%= badgeColor %>"></span>
+        <span style="font-size:var(--font-size-h5);color:var(--color-text-highlight);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1;min-width:0"><%= c.name %></span>
+        <% if (imageTag) { %>
+          <span style="font-size:var(--font-size-h5);color:var(--color-text-subdue);white-space:nowrap;flex-shrink:0"><%= imageTag %></span>
+        <% } %>
+        <span class="bz-svc-state-text" style="font-size:var(--font-size-h5);color:<%= badgeColor %>;white-space:nowrap;flex-shrink:0;margin-left:auto"><%= stateLabel %></span>
+      </div>
+
+      <%# Cell 2: CPU -%>
+      <div style="font-size:var(--font-size-h5);color:var(--color-text-subdue);text-align:right;white-space:nowrap"><%= c.cpu.toFixed(1) %>%</div>
+      <%# Cell 3: MEM -%>
+      <div style="font-size:var(--font-size-h5);color:var(--color-text-subdue);text-align:right;white-space:nowrap"><%= fmtMB(c.memory) %></div>
+
+      <% }); %>
+    </div>
+  </div>
+</details>
