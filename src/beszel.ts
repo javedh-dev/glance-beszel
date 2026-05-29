@@ -147,9 +147,15 @@ export interface PocketBaseList<T> {
 export class BeszelClient {
   private token: string | null = null;
   private tokenExpiry: number = 0;
+  private timeoutMs: number;
 
-  constructor(private config: BeszelConfig) {
+  constructor(private config: BeszelConfig, timeoutMs = 8000) {
     this.config.url = config.url.replace(/\/$/, "");
+    this.timeoutMs = timeoutMs;
+  }
+
+  private makeSignal(): AbortSignal {
+    return AbortSignal.timeout(this.timeoutMs);
   }
 
   private async authenticate(): Promise<void> {
@@ -165,6 +171,7 @@ export class BeszelClient {
           identity: this.config.email,
           password: this.config.password,
         }),
+        signal: this.makeSignal(),
       }
     );
 
@@ -198,6 +205,7 @@ export class BeszelClient {
 
     const res = await fetch(url.toString(), {
       headers: { Authorization: this.token! },
+      signal: this.makeSignal(),
     });
 
     if (!res.ok) {

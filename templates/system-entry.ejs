@@ -1,4 +1,4 @@
-<%# System entry partial — expects: bundle, beszelUrl, icons, resolveSystemIcon -%>
+<%# System entry partial — expects: bundle, beszelUrl, icons, resolveSystemIconParts -%>
 <%
   const s = bundle.system;
   const d = bundle.details;
@@ -6,15 +6,28 @@
   const isUp = s.status === 'up';
 
   const statusColor = isUp ? 'var(--color-positive)' : (s.status === 'paused' ? 'var(--color-subdue)' : 'var(--color-negative)');
-  const statusIcon  = s.status === 'paused' ? icons.CirclePause : icons.CircleX;
-  const systemIcon  = resolveSystemIcon(s.name, d);
+  const statusIcon  = s.status === 'paused' ? icons.CirclePauseSlot : icons.CircleXSlot;
+  const { base: systemIcon, badge: distroBadge } = resolveSystemIconParts(s.name, d);
 %>
+
+<%# Helper: renders the system icon with an optional distro badge overlay -%>
+<% function systemIconWithBadge(badgeSvg) { %>
+<span style="position:relative;display:inline-flex;flex-shrink:0;margin-right:6px">
+  <%- systemIcon %>
+  <% if (badgeSvg) { %>
+  <span style="position:absolute;bottom:-3px;right:-4px;display:inline-flex;background:var(--color-widget-background,#1a1a1a);border-radius:50%;line-height:0;opacity:0.8"><%- badgeSvg %></span>
+  <% } %>
+</span>
+<% } %>
 
 <% if (!isUp) { %>
 
-<%# ── Down / paused: simple single row, no expand ── -%>
+<%# ── Down / paused: status icon in chevron slot, OS icon + distro badge ── -%>
 <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
-  <span style="display:inline-flex;color:<%= statusColor %>"><%- statusIcon %></span>
+  <%# Chevron slot → status icon -%>
+  <span style="display:inline-flex;flex-shrink:0;color:<%= statusColor %>;margin-right:2px"><%- statusIcon %></span>
+  <%# OS icon with distro badge -%>
+  <%- systemIconWithBadge(distroBadge) %>
   <span class="color-highlight size-h4"><%= s.name %></span>
   <% if (s.host) { %><span class="color-subdue size-h5">(<%= s.host %>)</span><% } %>
   <span class="color-subdue size-h5" style="margin-left:auto"><%= s.status === 'paused' ? 'paused' : 'unreachable' %></span>
@@ -45,7 +58,7 @@
   <%# Col 1: arrow + OS icon + name + IP -%>
   <div class="bz-name-col">
     <%- icons.ChevronRight %>
-    <%- systemIcon %>
+    <%- systemIconWithBadge(distroBadge) %>
     <span class="color-highlight size-h4" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0"><%= s.name %></span>
     <% if (s.host) { %><span class="color-subdue size-h5" style="white-space:nowrap;flex-shrink:0">(<%= s.host %>)</span><% } %>
     <%# Uptime — shown only on narrow -%>

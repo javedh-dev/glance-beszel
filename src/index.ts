@@ -97,6 +97,21 @@ function buildFilter(
   return parts.length ? parts.join(" && ") : undefined;
 }
 
+// Pre-compute the env-level icon map and default filter once at startup.
+// Per-request overrides (icon_* / systems= / status= query params) bypass these.
+const ENV_ICON_MAP = buildIconMap(ICON_ENV);
+const DEFAULT_FILTER = buildFilter(SYSTEM_FILTER, STATUS_FILTER);
+
+// Tier function for default sort: non-up=0, up-bare=1, up-with-details=2
+function tier(bnd: SystemBundle): number {
+  if (bnd.system.status !== "up") return 0;
+  return bnd.containers.length > 0 ||
+    bnd.services.length > 0 ||
+    bnd.smartDevices.length > 0
+    ? 2
+    : 1;
+}
+
 // ---- App ----
 
 const app = express();
@@ -104,29 +119,36 @@ const client = new BeszelClient(beszelConfig);
 
 app.get("/", async (req: Request, res: Response) => {
   try {
-    // Query params override env defaults, allowing per-widget config in glance.yml:
+    // Query params allow per-widget config in glance.yml, e.g.:
     //   url: http://localhost:8088/?systems=pbs,nexus&status=up&order=nexus,pbs&collapse_after=3
-    const qSystems = (req.query.systems as string | undefined) ?? SYSTEM_FILTER;
-    const qStatus = (req.query.status as string | undefined) ?? STATUS_FILTER;
+    const qSystems = req.query.systems as string | undefined;
+    const qStatus = req.query.status as string | undefined;
     const qOrder = (req.query.order as string | undefined) ?? SYSTEM_ORDER;
     const qCollapseAfter =
       req.query.collapse_after !== undefined
         ? parseInt(req.query.collapse_after as string, 10)
         : COLLAPSE_AFTER;
 
-    // Per-request icon overrides merge on top of env-level ones.
-    // Query params: icon_proxmox=host1,host2&icon_vm=host3 etc.
-    const reqIconOverrides: Partial<Record<IconKey, string>> = { ...ICON_ENV };
-    for (const key of ICON_KEYS) {
-      const qval = req.query[`icon_${key}`] as string | undefined;
-      if (qval) reqIconOverrides[key] = qval;
+    // Only rebuild icon map if per-request icon_* overrides are present.
+    let iconMap = ENV_ICON_MAP;
+    const hasIconOverrides = ICON_KEYS.some((k) => req.query[`icon_${k}`]);
+    if (hasIconOverrides) {
+      const reqIconOverrides: Partial<Record<IconKey, string>> = { ...ICON_ENV };
+      for (const key of ICON_KEYS) {
+        const qval = req.query[`icon_${key}`] as string | undefined;
+        if (qval) reqIconOverrides[key] = qval;
+      }
+      iconMap = buildIconMap(reqIconOverrides);
     }
-    const iconMap = buildIconMap(reqIconOverrides);
 
-    const filter = buildFilter(qSystems, qStatus);
+    // Only rebuild filter if per-request systems/status overrides are present.
+    const filter =
+      qSystems !== undefined || qStatus !== undefined
+        ? buildFilter(qSystems ?? SYSTEM_FILTER, qStatus ?? STATUS_FILTER)
+        : DEFAULT_FILTER;
     const [systems, alerts, detailsMap] = await Promise.all([
       client.getSystems(filter),
-      SHOW_ALERTS ? client.getAlerts() : Promise.resolve([]),
+      SHOW_ALERTS ? client.getAlerts(true) : Promise.resolve([]),
       client.getSystemDetails(),
     ]);
 
@@ -176,14 +198,6 @@ app.get("/", async (req: Request, res: Response) => {
         if (ai !== -1) return -1;
         if (bi !== -1) return 1;
         return a.system.name.localeCompare(b.system.name);
-      }
-      function tier(bnd: SystemBundle): number {
-        if (bnd.system.status !== "up") return 0;
-        return bnd.containers.length > 0 ||
-          bnd.services.length > 0 ||
-          bnd.smartDevices.length > 0
-          ? 2
-          : 1;
       }
       const td = tier(a) - tier(b);
       if (td !== 0) return td;
