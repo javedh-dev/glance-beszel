@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express, { Request, Response } from "express";
+import compression from "compression";
 import { BeszelClient, BeszelConfig } from "./beszel";
 import { renderWidget, RenderOptions, SystemBundle } from "./template";
 
@@ -33,6 +34,8 @@ const STATUS_FILTER = optionalEnv("STATUS_FILTER", "");
 const SYSTEM_ORDER = optionalEnv("SYSTEM_ORDER", "");
 // How many systems start expanded from the top. 0 = all collapsed.
 const COLLAPSE_AFTER = parseInt(optionalEnv("COLLAPSE_AFTER", "0"), 10);
+// How long (seconds) to serve a cached response before re-fetching. 0 = disabled.
+const CACHE_TTL = parseInt(optionalEnv("CACHE_TTL", "30"), 10);
 
 // Supported icon category keys and their env var names
 const ICON_KEYS = [
@@ -115,12 +118,77 @@ function tier(bnd: SystemBundle): number {
 // ---- App ----
 
 const app = express();
+app.use(compression());
 const client = new BeszelClient(beszelConfig);
+
+// ---- Response cache (stale-while-revalidate) ----
+// Cache keyed by the full request URL so different query-param combinations
+// (systems=, status=, order=, icon_*) are cached independently.
+
+interface CacheEntry {
+  html: string;
+  expiresAt: number;    // epoch ms — when to start a background refresh
+  refreshing: boolean;  // true while a background fetch is in flight
+}
+
+const cache = new Map<string, CacheEntry>();
+
+async function fetchWidget(
+  filter: string | undefined,
+  qOrder: string,
+  qCollapseAfter: number,
+  iconMap: Map<string, string>,
+): Promise<string> {
+  const [systems, alerts, detailsMap] = await Promise.all([
+    client.getSystems(filter),
+    SHOW_ALERTS ? client.getAlerts(true) : Promise.resolve([]),
+    client.getSystemDetails(),
+  ]);
+
+  const bundles: SystemBundle[] = await Promise.all(
+    systems.map(async (system): Promise<SystemBundle> => {
+      if (system.status !== "up") {
+        return { system, details: detailsMap.get(system.id), containers: [], services: [], smartDevices: [] };
+      }
+      const [containers, services, smartDevices] = await Promise.all([
+        client.getContainersForSystem(system.id),
+        client.getServicesForSystem(system.id),
+        client.getSmartDevicesForSystem(system.id),
+      ]);
+      return { system, details: detailsMap.get(system.id), containers, services, smartDevices };
+    }),
+  );
+
+  const orderList = qOrder
+    ? qOrder.split(",").map((n) => n.trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  bundles.sort((a, b) => {
+    if (orderList.length > 0) {
+      const ai = orderList.indexOf(a.system.name.toLowerCase());
+      const bi = orderList.indexOf(b.system.name.toLowerCase());
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.system.name.localeCompare(b.system.name);
+    }
+    const td = tier(a) - tier(b);
+    if (td !== 0) return td;
+    return a.system.name.localeCompare(b.system.name);
+  });
+
+  const opts: RenderOptions = {
+    beszelUrl: WIDGET_TITLE_URL,
+    showAlerts: SHOW_ALERTS,
+    collapseAfter: qCollapseAfter,
+    iconMap,
+  };
+
+  return renderWidget(bundles, alerts, opts);
+}
 
 app.get("/", async (req: Request, res: Response) => {
   try {
-    // Query params allow per-widget config in glance.yml, e.g.:
-    //   url: http://localhost:8088/?systems=pbs,nexus&status=up&order=nexus,pbs&collapse_after=3
     const qSystems = req.query.systems as string | undefined;
     const qStatus = req.query.status as string | undefined;
     const qOrder = (req.query.order as string | undefined) ?? SYSTEM_ORDER;
@@ -129,7 +197,6 @@ app.get("/", async (req: Request, res: Response) => {
         ? parseInt(req.query.collapse_after as string, 10)
         : COLLAPSE_AFTER;
 
-    // Only rebuild icon map if per-request icon_* overrides are present.
     let iconMap = ENV_ICON_MAP;
     const hasIconOverrides = ICON_KEYS.some((k) => req.query[`icon_${k}`]);
     if (hasIconOverrides) {
@@ -141,82 +208,49 @@ app.get("/", async (req: Request, res: Response) => {
       iconMap = buildIconMap(reqIconOverrides);
     }
 
-    // Only rebuild filter if per-request systems/status overrides are present.
     const filter =
       qSystems !== undefined || qStatus !== undefined
         ? buildFilter(qSystems ?? SYSTEM_FILTER, qStatus ?? STATUS_FILTER)
         : DEFAULT_FILTER;
-    const [systems, alerts, detailsMap] = await Promise.all([
-      client.getSystems(filter),
-      SHOW_ALERTS ? client.getAlerts(true) : Promise.resolve([]),
-      client.getSystemDetails(),
-    ]);
 
-    // Fetch per-system detail data in parallel
-    const bundles: SystemBundle[] = await Promise.all(
-      systems.map(async (system): Promise<SystemBundle> => {
-        if (system.status !== "up") {
-          return {
-            system,
-            details: detailsMap.get(system.id),
-            containers: [],
-            services: [],
-            smartDevices: [],
-          };
-        }
-        const [containers, services, smartDevices] = await Promise.all([
-          client.getContainersForSystem(system.id),
-          client.getServicesForSystem(system.id),
-          client.getSmartDevicesForSystem(system.id),
-        ]);
-        return {
-          system,
-          details: detailsMap.get(system.id),
-          containers,
-          services,
-          smartDevices,
-        };
-      }),
-    );
+    const cacheKey = req.url;
+    const now = Date.now();
+    const entry = cache.get(cacheKey);
 
-    // Sort bundles.
-    // If an explicit order list is given (comma-separated names), those systems appear
-    // first in that order (case-insensitive). Systems not in the list follow alphabetically.
-    // Without an order list: down/paused → bare up → up with details, then alpha within tier.
-    const orderList = qOrder
-      ? qOrder
-          .split(",")
-          .map((n) => n.trim().toLowerCase())
-          .filter(Boolean)
-      : [];
+    let html: string;
 
-    bundles.sort((a, b) => {
-      if (orderList.length > 0) {
-        const ai = orderList.indexOf(a.system.name.toLowerCase());
-        const bi = orderList.indexOf(b.system.name.toLowerCase());
-        if (ai !== -1 && bi !== -1) return ai - bi;
-        if (ai !== -1) return -1;
-        if (bi !== -1) return 1;
-        return a.system.name.localeCompare(b.system.name);
+    if (entry && now < entry.expiresAt) {
+      // Fully fresh — serve immediately
+      html = entry.html;
+    } else if (entry && !entry.refreshing) {
+      // Stale — serve immediately and kick off a background refresh
+      html = entry.html;
+      entry.refreshing = true;
+      fetchWidget(filter, qOrder, qCollapseAfter, iconMap)
+        .then((fresh) => {
+          cache.set(cacheKey, {
+            html: fresh,
+            expiresAt: Date.now() + CACHE_TTL * 1000,
+            refreshing: false,
+          });
+        })
+        .catch((err) => {
+          console.error("Background cache refresh failed:", err instanceof Error ? err.message : err);
+          entry.refreshing = false;
+        });
+    } else {
+      // No cache entry (or refresh already in flight) — fetch synchronously
+      html = await fetchWidget(filter, qOrder, qCollapseAfter, iconMap);
+      if (CACHE_TTL > 0) {
+        cache.set(cacheKey, { html, expiresAt: now + CACHE_TTL * 1000, refreshing: false });
       }
-      const td = tier(a) - tier(b);
-      if (td !== 0) return td;
-      return a.system.name.localeCompare(b.system.name);
-    });
-
-    const opts: RenderOptions = {
-      beszelUrl: WIDGET_TITLE_URL,
-      showAlerts: SHOW_ALERTS,
-      collapseAfter: qCollapseAfter,
-      iconMap,
-    };
-
-    const html = renderWidget(bundles, alerts, opts);
+    }
 
     res.setHeader("Widget-Title", WIDGET_TITLE);
     res.setHeader("Widget-Title-URL", WIDGET_TITLE_URL);
     res.setHeader("Widget-Content-Type", "html");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", `public, max-age=${CACHE_TTL}, stale-while-revalidate=${CACHE_TTL * 2}`);
     res.send(html);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -241,6 +275,7 @@ app.listen(PORT, () => {
   console.log(`  Beszel URL:   ${beszelConfig.url}`);
   console.log(`  Widget title: ${WIDGET_TITLE}`);
   console.log(`  Show alerts:  ${SHOW_ALERTS}`);
+  console.log(`  Cache TTL:    ${CACHE_TTL}s`);
   if (SYSTEM_FILTER) console.log(`  System filter: ${SYSTEM_FILTER}`);
   if (STATUS_FILTER) console.log(`  Status filter: ${STATUS_FILTER}`);
   if (SYSTEM_ORDER) console.log(`  System order:  ${SYSTEM_ORDER}`);
