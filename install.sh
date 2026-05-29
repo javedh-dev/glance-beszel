@@ -90,15 +90,22 @@ warn()    { echo -e "${YELLOW}${BOLD} !${RESET} $*"; }
 die()     { echo -e "${RED}${BOLD}ERROR:${RESET} $*" >&2; exit 1; }
 
 # ask_var VAR_NAME "Question" "default"
+# Skips prompt if the variable is already set in the environment.
 ask_var() {
   local varname="$1" question="$2" default="$3"
-  if [[ "$HEADLESS" == "true" ]]; then
-    local cur="${!varname:-}"
-    printf -v "$varname" '%s' "${cur:-$default}"
+  local cur="${!varname:-}"
+  # Already set — use it as-is, no prompt needed
+  if [[ -n "$cur" ]]; then
+    success "${question}: ${cur}"
     return
   fi
-  local cur="${!varname:-}"
-  local shown="${cur:-$default}"
+  # Headless with no value — fall back to default
+  if [[ "$HEADLESS" == "true" ]]; then
+    printf -v "$varname" '%s' "$default"
+    return
+  fi
+  # Interactive prompt
+  local shown="$default"
   echo -en "${BOLD}${question}${RESET}"
   [[ -n "$shown" ]] && echo -en " ${CYAN}[${shown}]${RESET}"
   echo -en ": "
@@ -107,22 +114,24 @@ ask_var() {
 }
 
 # ask_secret VAR_NAME "Question"  — masked input, required
+# Skips prompt if the variable is already set in the environment.
 ask_secret() {
   local varname="$1" question="$2"
-  if [[ "$HEADLESS" == "true" ]]; then
-    [[ -n "${!varname:-}" ]] || die "$varname must be set when running headless"
+  local cur="${!varname:-}"
+  # Already set — no prompt
+  if [[ -n "$cur" ]]; then
+    success "${question}: [already set]"
     return
   fi
-  local cur="${!varname:-}"
-  echo -en "${BOLD}${question}${RESET}"
-  [[ -n "$cur" ]] && echo -en " ${CYAN}[already set]${RESET}"
-  echo -en ": "
-  local inp; read -rs inp </dev/tty; echo
-  if [[ -n "$inp" ]]; then
-    printf -v "$varname" '%s' "$inp"
-  elif [[ -z "$cur" ]]; then
-    die "$varname is required"
+  # Headless with no value — error
+  if [[ "$HEADLESS" == "true" ]]; then
+    die "$varname must be set when running headless"
   fi
+  # Interactive prompt
+  echo -en "${BOLD}${question}${RESET}: "
+  local inp; read -rs inp </dev/tty; echo
+  [[ -n "$inp" ]] || die "$varname is required"
+  printf -v "$varname" '%s' "$inp"
 }
 
 # ask_confirm "Question" [y|n]
