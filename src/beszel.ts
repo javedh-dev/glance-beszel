@@ -1,4 +1,10 @@
-import { Pool, fetch as uFetch } from "undici";
+import https from "https";
+import http from "http";
+
+// Persistent keep-alive agents — reuse TCP/TLS connections across all API calls
+// instead of opening a new connection per request. Compatible with all Node versions.
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 10, keepAliveMsecs: 30_000 });
+const httpAgent  = new http.Agent({  keepAlive: true, maxSockets: 10, keepAliveMsecs: 30_000 });
 
 export interface BeszelConfig {
   url: string;
@@ -150,23 +156,12 @@ export class BeszelClient {
   private token: string | null = null;
   private tokenExpiry: number = 0;
   private timeoutMs: number;
-  private pool: Pool;
+  private agent: https.Agent | http.Agent;
 
   constructor(private config: BeszelConfig, timeoutMs = 8000) {
     this.config.url = config.url.replace(/\/$/, "");
     this.timeoutMs = timeoutMs;
-
-    // Create a persistent connection pool to the Beszel origin.
-    // This reuses TCP/TLS connections across all API calls instead of
-    // opening a new connection per request — critical when the server
-    // is behind a TLS-terminating reverse proxy.
-    const origin = new URL(this.config.url).origin;
-    this.pool = new Pool(origin, {
-      connections: 10,
-      pipelining: 1,
-      keepAliveTimeout: 30_000,
-      keepAliveMaxTimeout: 30_000,
-    });
+    this.agent = this.config.url.startsWith("https") ? httpsAgent : httpAgent;
   }
 
   private makeSignal(): AbortSignal {
@@ -174,12 +169,12 @@ export class BeszelClient {
   }
 
   private async poolFetch(path: string, init: Record<string, unknown> = {}): Promise<Response> {
-    return uFetch(`${this.config.url}${path}`, {
+    return fetch(`${this.config.url}${path}`, {
       ...init,
-      dispatcher: this.pool,
-      signal: this.makeSignal(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any) as unknown as Response;
+      // @ts-expect-error — Node's fetch accepts agent but it's not in the standard types
+      agent: this.agent,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
   }
 
   private async authenticate(): Promise<void> {
@@ -318,8 +313,7 @@ export class BeszelClient {
   // Returns a Map keyed by system ID for O(1) lookup.
 
   private buildBulkFilter(systemIds: string[]): string {
-    // "system?~" is PocketBase's anyOf modifier: system?~'["id1","id2",...]'
-    return `system?~'${JSON.stringify(systemIds)}'`;
+    return systemIds.map((id) => `system="${id}"`).join("||");
   }
 
   async getAllContainers(systemIds: string[]): Promise<Map<string, ContainerRecord[]>> {
@@ -327,7 +321,7 @@ export class BeszelClient {
     try {
       const data = await this.get<PocketBaseList<ContainerRecord>>(
         "/api/collections/containers/records",
-        { filter: this.buildBulkFilter(systemIds), perPage: "200", sort: "name" }
+        { filter: this.buildBulkFilter(systemIds), perPage: "1000", sort: "-memory" }
       );
       const map = new Map<string, ContainerRecord[]>();
       for (const item of data.items) {
@@ -346,7 +340,7 @@ export class BeszelClient {
     try {
       const data = await this.get<PocketBaseList<ServiceRecord>>(
         "/api/collections/systemd_services/records",
-        { filter: this.buildBulkFilter(systemIds), perPage: "200", sort: "name" }
+        { filter: this.buildBulkFilter(systemIds), perPage: "1000", sort: "-memory" }
       );
       const map = new Map<string, ServiceRecord[]>();
       for (const item of data.items) {
@@ -365,7 +359,7 @@ export class BeszelClient {
     try {
       const data = await this.get<PocketBaseList<SmartDeviceRecord>>(
         "/api/collections/smart_devices/records",
-        { filter: this.buildBulkFilter(systemIds), perPage: "200", sort: "name" }
+        { filter: this.buildBulkFilter(systemIds), perPage: "1000", sort: "name" }
       );
       const map = new Map<string, SmartDeviceRecord[]>();
       for (const item of data.items) {
