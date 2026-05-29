@@ -226,17 +226,100 @@ INIT_SYSTEM="none"
 [[ "$OS" == "Darwin" ]] && INIT_SYSTEM="launchd"
 
 # ─────────────────────────────────────────────
-# Check Node.js
+# Node.js — install automatically if missing or too old
 # ─────────────────────────────────────────────
 
+# Install Node.js via the official NodeSource setup script (Linux) or
+# nvm (macOS / Linux fallback). We target the LTS line (Node 20).
+NODE_TARGET_MAJOR=20
+
+_install_node_linux() {
+  info "Installing Node.js ${NODE_TARGET_MAJOR} LTS via NodeSource ..."
+  local setup_url="https://deb.nodesource.com/setup_${NODE_TARGET_MAJOR}.x"
+
+  if command -v apt-get &>/dev/null; then
+    curl -fsSL "$setup_url" | sudo -E bash -
+    sudo apt-get install -y nodejs
+  elif command -v dnf &>/dev/null; then
+    curl -fsSL "https://rpm.nodesource.com/setup_${NODE_TARGET_MAJOR}.x" | sudo bash -
+    sudo dnf install -y nodejs
+  elif command -v yum &>/dev/null; then
+    curl -fsSL "https://rpm.nodesource.com/setup_${NODE_TARGET_MAJOR}.x" | sudo bash -
+    sudo yum install -y nodejs
+  elif command -v pacman &>/dev/null; then
+    sudo pacman -S --noconfirm nodejs npm
+  elif command -v zypper &>/dev/null; then
+    sudo zypper install -y nodejs20
+  else
+    _install_node_nvm
+  fi
+}
+
+_install_node_brew() {
+  if ! command -v brew &>/dev/null; then
+    warn "Homebrew not found — falling back to nvm"
+    _install_node_nvm
+    return
+  fi
+  info "Installing Node.js via Homebrew ..."
+  brew install node@${NODE_TARGET_MAJOR}
+  # Homebrew keg-only: add to PATH for this session
+  local brew_prefix
+  brew_prefix="$(brew --prefix)"
+  export PATH="${brew_prefix}/opt/node@${NODE_TARGET_MAJOR}/bin:${PATH}"
+}
+
+_install_node_nvm() {
+  info "Installing Node.js via nvm ..."
+  local nvm_dir="${NVM_DIR:-${HOME}/.nvm}"
+  # Download and source nvm if not already present
+  if [[ ! -s "${nvm_dir}/nvm.sh" ]]; then
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+  fi
+  # shellcheck source=/dev/null
+  source "${nvm_dir}/nvm.sh"
+  nvm install "${NODE_TARGET_MAJOR}"
+  nvm use "${NODE_TARGET_MAJOR}"
+  # Make node visible to the rest of this script
+  export PATH="${nvm_dir}/versions/node/$(nvm version)/bin:${PATH}"
+}
+
 check_node() {
-  command -v node &>/dev/null || \
-    die "Node.js not found. Install Node.js 18+ from https://nodejs.org and re-run."
-  local ver major
-  ver="$(node --version)"         # v20.x.x
-  major="${ver#v}"; major="${major%%.*}"
-  (( major >= 18 )) || die "Node.js ${ver} is too old — version 18+ required."
-  success "Node.js ${ver}"
+  local ver major needs_install=false
+
+  if command -v node &>/dev/null; then
+    ver="$(node --version)"
+    major="${ver#v}"; major="${major%%.*}"
+    if (( major >= 18 )); then
+      success "Node.js ${ver}"
+      return
+    fi
+    warn "Node.js ${ver} is too old (need 18+) — will install Node.js ${NODE_TARGET_MAJOR}"
+    needs_install=true
+  else
+    warn "Node.js not found — will install Node.js ${NODE_TARGET_MAJOR} LTS automatically"
+    needs_install=true
+  fi
+
+  if [[ "$needs_install" == "true" ]]; then
+    if [[ "$HEADLESS" != "true" ]]; then
+      ask_confirm "Install Node.js ${NODE_TARGET_MAJOR} LTS now?" "y" || \
+        die "Node.js is required. Install it manually from https://nodejs.org and re-run."
+    fi
+
+    if [[ "$OS" == "Linux" ]]; then
+      _install_node_linux
+    elif [[ "$OS" == "Darwin" ]]; then
+      _install_node_brew
+    else
+      _install_node_nvm
+    fi
+
+    # Verify the install worked
+    command -v node &>/dev/null || die "Node.js installation failed. Install manually from https://nodejs.org"
+    ver="$(node --version)"
+    success "Node.js ${ver} installed"
+  fi
 }
 
 # ─────────────────────────────────────────────
