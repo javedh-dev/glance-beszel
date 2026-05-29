@@ -75,8 +75,9 @@
 <% } else { %>
   <ul class="list collapsible-container"<% if (collapseAfter > 0) { %> data-collapse-after="<%= collapseAfter %>"<% } %>>
 <% bundles.forEach(function(bundle) { %>
-    <li class="bz-li"><%- include('system-entry', { bundle: bundle, beszelUrl: beszelUrl, icons: icons, resolveSystemIcon: resolveSystemIcon }) %></li>
+    <li class="bz-li"><%- include('system-entry', { bundle: bundle, beszelUrl: beszelUrl, icons: icons, resolveSystemIconParts: resolveSystemIconParts }) %></li>
 <% }); %>
   </ul>
 <% } %>
 </div>
+<%- svgDefs() %>

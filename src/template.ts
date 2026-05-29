@@ -1,4 +1,5 @@
 import path from "path";
+import fs from "fs";
 import ejs from "ejs";
 import * as lucide from "lucide";
 import * as si from "simple-icons";
@@ -10,6 +11,71 @@ import {
   ServiceRecord,
   SmartDeviceRecord,
 } from "./beszel";
+
+// ---- SVG Symbol Registry ----
+// Deduplicates repeated SVG content by defining each unique SVG as a <symbol>
+// and replacing subsequent uses with a tiny <svg><use href="#id"/></svg>.
+// Call .defsHtml() to get the <svg> defs block to emit once at the top of the page.
+
+export class SvgRegistry {
+  private defs = new Map<string, string>(); // id → symbol inner content
+  private counter = 0;
+  private index = new Map<string, string>(); // svgContent → id
+
+  // Register an SVG string; return a lightweight <use> reference SVG.
+  // width/height/style are taken from the original SVG attrs for the <use> wrapper.
+  use(svg: string): string {
+    if (!svg) return svg;
+
+    // Extract key presentation attributes from the original SVG to apply to <use> wrapper
+    const widthM  = svg.match(/\bwidth="([^"]+)"/);
+    const heightM = svg.match(/\bheight="([^"]+)"/);
+    const styleM  = svg.match(/\bstyle="([^"]+)"/);
+    const classM  = svg.match(/\bclass="([^"]+)"/);
+    const fillM   = svg.match(/<svg[^>]*\bfill="([^"]+)"/);
+    const strokeM = svg.match(/<svg[^>]*\bstroke="([^"]+)"/);
+
+    const w = widthM?.[1] ?? "18";
+    const h = heightM?.[1] ?? "18";
+
+    // Build a cache key from the SVG content (strip size attrs that vary between badge/base)
+    // Use the full string as key so different sizes are different symbols
+    let id = this.index.get(svg);
+    if (!id) {
+      id = `bz-s${++this.counter}`;
+      this.index.set(svg, id);
+
+      // Extract viewBox
+      const vbM = svg.match(/\bviewBox="([^"]+)"/);
+      const vb = vbM?.[1] ?? "0 0 24 24";
+
+      // Extract inner content (everything between first > and last </)
+      const innerM = svg.match(/^<svg[^>]*>([\s\S]*)<\/svg>$/);
+      const inner = innerM?.[1] ?? "";
+
+      this.defs.set(id, `<symbol id="${id}" viewBox="${vb}">${inner}</symbol>`);
+    }
+
+    // Build a minimal <svg> wrapper that replicates the visual of the original
+    let wrapAttrs = `width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg"`;
+    if (styleM) wrapAttrs += ` style="${styleM[1]}"`;
+    if (classM) wrapAttrs += ` class="${classM[1]}"`;
+
+    // Lucide icons use stroke=currentColor; simple-icons use fill with a color.
+    // Pass these through so the <use> inherits the right paint server.
+    let useAttrs = "";
+    if (fillM)   useAttrs += ` fill="${fillM[1]}"`;
+    if (strokeM) useAttrs += ` stroke="${strokeM[1]}"`;
+
+    return `<svg ${wrapAttrs}><use href="#${id}"${useAttrs}/></svg>`;
+  }
+
+  // Returns the hidden <svg> defs block to emit once at the top of the HTML.
+  defsHtml(): string {
+    if (this.defs.size === 0) return "";
+    return `<svg xmlns="http://www.w3.org/2000/svg" style="display:none">${[...this.defs.values()].join("")}</svg>`;
+  }
+}
 
 // ---- Bundle type ----
 
@@ -27,8 +93,6 @@ export interface RenderOptions {
   collapseAfter: number;
   iconMap: Map<string, string>;  // system name (lower) → category key
 }
-
-import fs from "fs";
 
 const TEMPLATES_DIR = path.resolve(__dirname, "../templates");
 
@@ -266,6 +330,13 @@ export function renderWidget(
   alerts: AlertRecord[],
   opts: RenderOptions,
 ): string {
+  const reg = new SvgRegistry();
+
+  // Wrap all pre-built static icons through the registry so they are defined once as symbols.
+  const icons = Object.fromEntries(
+    Object.entries(ICONS).map(([k, v]) => [k, reg.use(v)])
+  ) as typeof ICONS;
+
   return ejs.render(
     WIDGET_TEMPLATE,
     {
@@ -274,12 +345,18 @@ export function renderWidget(
       showAlerts: opts.showAlerts,
       beszelUrl: opts.beszelUrl,
       collapseAfter: opts.collapseAfter,
-      icons: ICONS,
+      icons,
+      svgDefs: () => reg.defsHtml(),
       osIcon,
       resolveSystemIcon: (name: string, details: { os_name: string; os: number } | undefined) =>
         resolveSystemIcon(name, details, opts.iconMap),
-      resolveSystemIconParts: (name: string, details: { os_name: string; os: number } | undefined) =>
-        resolveSystemIconParts(name, details, opts.iconMap),
+      resolveSystemIconParts: (name: string, details: { os_name: string; os: number } | undefined) => {
+        const parts = resolveSystemIconParts(name, details, opts.iconMap);
+        return {
+          base: reg.use(parts.base),
+          badge: parts.badge ? reg.use(parts.badge) : null,
+        };
+      },
     },
     {
       filename: path.join(TEMPLATES_DIR, "widget.ejs"),
