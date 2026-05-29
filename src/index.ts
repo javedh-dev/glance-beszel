@@ -145,29 +145,28 @@ async function fetchWidget(
   const alertsPromise = SHOW_ALERTS ? client.getAlerts(true) : Promise.resolve([]);
   const detailsPromise = client.getSystemDetails();
 
-  // Fetch systems; as soon as we have IDs, fire all per-system calls in parallel
-  // without waiting for alerts/details to finish.
+  // Fetch systems; once we have IDs collect the "up" ones and bulk-fetch all
+  // their details in 3 requests total instead of 3×N requests.
   const systems = await client.getSystems(filter);
+  const upIds = systems.filter((s) => s.status === "up").map((s) => s.id);
 
-  const bundlePromises = systems.map(async (system): Promise<SystemBundle> => {
-    const details = detailsPromise.then((m) => m.get(system.id));
-    if (system.status !== "up") {
-      return { system, details: await details, containers: [], services: [], smartDevices: [] };
-    }
-    const [resolvedDetails, containers, services, smartDevices] = await Promise.all([
-      details,
-      client.getContainersForSystem(system.id),
-      client.getServicesForSystem(system.id),
-      client.getSmartDevicesForSystem(system.id),
-    ]);
-    return { system, details: resolvedDetails, containers, services, smartDevices };
-  });
-
-  // Wait for everything to settle
-  const [bundles, alerts] = await Promise.all([
-    Promise.all(bundlePromises),
+  // Fire bulk detail fetches + alerts + system_details all in parallel.
+  const [containersMap, servicesMap, smartDevicesMap, alerts] = await Promise.all([
+    client.getAllContainers(upIds),
+    client.getAllServices(upIds),
+    client.getAllSmartDevices(upIds),
     alertsPromise,
   ]);
+
+  const detailsMap = await detailsPromise;
+
+  const bundles: SystemBundle[] = systems.map((system): SystemBundle => ({
+    system,
+    details: detailsMap.get(system.id),
+    containers: containersMap.get(system.id) ?? [],
+    services: servicesMap.get(system.id) ?? [],
+    smartDevices: smartDevicesMap.get(system.id) ?? [],
+  }));
 
   const orderList = qOrder
     ? qOrder.split(",").map((n) => n.trim().toLowerCase()).filter(Boolean)

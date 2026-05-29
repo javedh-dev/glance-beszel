@@ -1,3 +1,5 @@
+import { Pool, fetch as uFetch } from "undici";
+
 export interface BeszelConfig {
   url: string;
   email: string;
@@ -148,22 +150,44 @@ export class BeszelClient {
   private token: string | null = null;
   private tokenExpiry: number = 0;
   private timeoutMs: number;
+  private pool: Pool;
 
   constructor(private config: BeszelConfig, timeoutMs = 8000) {
     this.config.url = config.url.replace(/\/$/, "");
     this.timeoutMs = timeoutMs;
+
+    // Create a persistent connection pool to the Beszel origin.
+    // This reuses TCP/TLS connections across all API calls instead of
+    // opening a new connection per request — critical when the server
+    // is behind a TLS-terminating reverse proxy.
+    const origin = new URL(this.config.url).origin;
+    this.pool = new Pool(origin, {
+      connections: 10,
+      pipelining: 1,
+      keepAliveTimeout: 30_000,
+      keepAliveMaxTimeout: 30_000,
+    });
   }
 
   private makeSignal(): AbortSignal {
     return AbortSignal.timeout(this.timeoutMs);
   }
 
+  private async poolFetch(path: string, init: Record<string, unknown> = {}): Promise<Response> {
+    return uFetch(`${this.config.url}${path}`, {
+      ...init,
+      dispatcher: this.pool,
+      signal: this.makeSignal(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any) as unknown as Response;
+  }
+
   private async authenticate(): Promise<void> {
     const now = Date.now();
     if (this.token && now < this.tokenExpiry - 5 * 60 * 1000) return;
 
-    const res = await fetch(
-      `${this.config.url}/api/collections/users/auth-with-password`,
+    const res = await this.poolFetch(
+      `/api/collections/users/auth-with-password`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -171,7 +195,6 @@ export class BeszelClient {
           identity: this.config.email,
           password: this.config.password,
         }),
-        signal: this.makeSignal(),
       }
     );
 
@@ -204,9 +227,8 @@ export class BeszelClient {
     }
 
     const t0 = Date.now();
-    const res = await fetch(url.toString(), {
+    const res = await this.poolFetch(url.pathname + url.search, {
       headers: { Authorization: this.token! },
-      signal: this.makeSignal(),
     });
     const elapsed = Date.now() - t0;
 
@@ -287,6 +309,73 @@ export class BeszelClient {
       return data.items;
     } catch {
       return [];
+    }
+  }
+
+  // Bulk fetch all containers/services/smart_devices for a set of system IDs in one request each.
+  // Uses PocketBase's `system?~` anyOf filter which maps to SQL IN(...) — more efficient
+  // than chained || on large collections like systemd_services.
+  // Returns a Map keyed by system ID for O(1) lookup.
+
+  private buildBulkFilter(systemIds: string[]): string {
+    // "system?~" is PocketBase's anyOf modifier: system?~'["id1","id2",...]'
+    return `system?~'${JSON.stringify(systemIds)}'`;
+  }
+
+  async getAllContainers(systemIds: string[]): Promise<Map<string, ContainerRecord[]>> {
+    if (systemIds.length === 0) return new Map();
+    try {
+      const data = await this.get<PocketBaseList<ContainerRecord>>(
+        "/api/collections/containers/records",
+        { filter: this.buildBulkFilter(systemIds), perPage: "200", sort: "name" }
+      );
+      const map = new Map<string, ContainerRecord[]>();
+      for (const item of data.items) {
+        const list = map.get(item.system) ?? [];
+        list.push(item);
+        map.set(item.system, list);
+      }
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
+
+  async getAllServices(systemIds: string[]): Promise<Map<string, ServiceRecord[]>> {
+    if (systemIds.length === 0) return new Map();
+    try {
+      const data = await this.get<PocketBaseList<ServiceRecord>>(
+        "/api/collections/systemd_services/records",
+        { filter: this.buildBulkFilter(systemIds), perPage: "200", sort: "name" }
+      );
+      const map = new Map<string, ServiceRecord[]>();
+      for (const item of data.items) {
+        const list = map.get(item.system) ?? [];
+        list.push(item);
+        map.set(item.system, list);
+      }
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
+
+  async getAllSmartDevices(systemIds: string[]): Promise<Map<string, SmartDeviceRecord[]>> {
+    if (systemIds.length === 0) return new Map();
+    try {
+      const data = await this.get<PocketBaseList<SmartDeviceRecord>>(
+        "/api/collections/smart_devices/records",
+        { filter: this.buildBulkFilter(systemIds), perPage: "200", sort: "name" }
+      );
+      const map = new Map<string, SmartDeviceRecord[]>();
+      for (const item of data.items) {
+        const list = map.get(item.system) ?? [];
+        list.push(item);
+        map.set(item.system, list);
+      }
+      return map;
+    } catch {
+      return new Map();
     }
   }
 
