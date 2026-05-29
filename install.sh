@@ -69,7 +69,9 @@ _bootstrap() {
   trap - EXIT
 
   echo "==> Launching installer from ${src_dir} ..."
-  exec bash "${src_dir}/install.sh" "$@"
+  # Redirect stdin from /dev/tty so interactive prompts work even when
+  # the script was piped through curl | bash (where stdin is the script).
+  exec bash "${src_dir}/install.sh" "$@" </dev/tty
 }
 
 # Detect pipe: BASH_SOURCE[0] is empty, "bash", or a /dev/fd/... path
@@ -95,6 +97,8 @@ die()     { echo -e "${RED}${BOLD}ERROR:${RESET} $*" >&2; exit 1; }
 
 # ─────────────────────────────────────────────
 # Prompt helpers
+# All read calls use </dev/tty explicitly so prompts work whether the
+# script was invoked directly or re-exec'd after a curl | bash pipe.
 # ─────────────────────────────────────────────
 
 # ask_var VAR_NAME "Question text" "default"
@@ -111,7 +115,7 @@ ask_var() {
   echo -en "${BOLD}${question}${RESET}"
   [[ -n "$shown" ]] && echo -en " ${CYAN}[${shown}]${RESET}"
   echo -en ": "
-  local inp; read -r inp
+  local inp; read -r inp </dev/tty
   printf -v "$varname" '%s' "${inp:-$shown}"
 }
 
@@ -128,7 +132,7 @@ ask_secret() {
   echo -en "${BOLD}${question}${RESET}"
   [[ -n "$cur" ]] && echo -en " ${CYAN}[already set]${RESET}"
   echo -en ": "
-  local inp; read -rs inp; echo
+  local inp; read -rs inp </dev/tty; echo
   if [[ -n "$inp" ]]; then
     printf -v "$varname" '%s' "$inp"
   elif [[ -z "$cur" ]]; then
@@ -143,17 +147,18 @@ ask_confirm() {
   if [[ "$HEADLESS" == "true" ]]; then return 0; fi
   local hint="[Y/n]"; [[ "$default" == "n" ]] && hint="[y/N]"
   echo -en "${BOLD}${question}${RESET} ${CYAN}${hint}${RESET}: "
-  local inp; read -r inp
+  local inp; read -r inp </dev/tty
   inp="${inp:-$default}"
   [[ "$inp" =~ ^[Yy] ]]
 }
 
-# ask_confirm_default_no: headless returns 1 (no) — safe default
+# ask_confirm_no "Question" — default answer is No
+# Headless always returns 1 (no) — safe default.
 ask_confirm_no() {
   local question="$1"
   if [[ "$HEADLESS" == "true" ]]; then return 1; fi
   echo -en "${BOLD}${question}${RESET} ${CYAN}[y/N]${RESET}: "
-  local inp; read -r inp
+  local inp; read -r inp </dev/tty
   inp="${inp:-n}"
   [[ "$inp" =~ ^[Yy] ]]
 }
