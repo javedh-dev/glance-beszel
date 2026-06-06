@@ -18,12 +18,15 @@ import {
 // Call .defsHtml() to get the <svg> defs block to emit once at the top of the page.
 
 export class SvgRegistry {
-  private defs = new Map<string, string>(); // id → symbol inner content
+  private defs = new Map<string, string>();
   private counter = 0;
-  private index = new Map<string, string>(); // svgContent → id
+  private index = new Map<string, string>();
+  private prefix: string;
 
-  // Register an SVG string; return a lightweight <use> reference SVG.
-  // width/height/style are taken from the original SVG attrs for the <use> wrapper.
+  constructor(prefix = "bz") {
+    this.prefix = prefix;
+  }
+
   use(svg: string): string {
     if (!svg) return svg;
 
@@ -42,7 +45,7 @@ export class SvgRegistry {
     // Use the full string as key so different sizes are different symbols
     let id = this.index.get(svg);
     if (!id) {
-      id = `bz-s${++this.counter}`;
+      id = `${this.prefix}-s${++this.counter}`;
       this.index.set(svg, id);
 
       // Extract viewBox

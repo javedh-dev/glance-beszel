@@ -3,6 +3,10 @@ import express, { Request, Response } from "express";
 import compression from "compression";
 import { BeszelClient, BeszelConfig } from "./beszel";
 import { renderWidget, RenderOptions, SystemBundle } from "./template";
+import { GitHubCopilotClient, CopilotConfig } from "./copilot";
+import { renderCopilotWidget, CopilotRenderOptions } from "./copilot-template";
+import { OpenRouterClient } from "./openrouter";
+import { renderOpenRouterWidget, OpenRouterRenderOptions } from "./openrouter-template";
 
 // ---- Config from environment variables ----
 
@@ -127,8 +131,8 @@ const client = new BeszelClient(beszelConfig);
 
 interface CacheEntry {
   html: string;
-  expiresAt: number;    // epoch ms — when to start a background refresh
-  refreshing: boolean;  // true while a background fetch is in flight
+  expiresAt: number; // epoch ms — when to start a background refresh
+  refreshing: boolean; // true while a background fetch is in flight
 }
 
 const cache = new Map<string, CacheEntry>();
@@ -142,7 +146,9 @@ async function fetchWidget(
   const t0 = Date.now();
 
   // Start alerts and system_details immediately — they have no dependencies.
-  const alertsPromise = SHOW_ALERTS ? client.getAlerts(true) : Promise.resolve([]);
+  const alertsPromise = SHOW_ALERTS
+    ? client.getAlerts(true)
+    : Promise.resolve([]);
   const detailsPromise = client.getSystemDetails();
 
   // Fetch systems; once we have IDs collect the "up" ones and bulk-fetch all
@@ -151,25 +157,31 @@ async function fetchWidget(
   const upIds = systems.filter((s) => s.status === "up").map((s) => s.id);
 
   // Fire bulk detail fetches + alerts + system_details all in parallel.
-  const [containersMap, servicesMap, smartDevicesMap, alerts] = await Promise.all([
-    client.getAllContainers(upIds),
-    client.getAllServices(upIds),
-    client.getAllSmartDevices(upIds),
-    alertsPromise,
-  ]);
+  const [containersMap, servicesMap, smartDevicesMap, alerts] =
+    await Promise.all([
+      client.getAllContainers(upIds),
+      client.getAllServices(upIds),
+      client.getAllSmartDevices(upIds),
+      alertsPromise,
+    ]);
 
   const detailsMap = await detailsPromise;
 
-  const bundles: SystemBundle[] = systems.map((system): SystemBundle => ({
-    system,
-    details: detailsMap.get(system.id),
-    containers: containersMap.get(system.id) ?? [],
-    services: servicesMap.get(system.id) ?? [],
-    smartDevices: smartDevicesMap.get(system.id) ?? [],
-  }));
+  const bundles: SystemBundle[] = systems.map(
+    (system): SystemBundle => ({
+      system,
+      details: detailsMap.get(system.id),
+      containers: containersMap.get(system.id) ?? [],
+      services: servicesMap.get(system.id) ?? [],
+      smartDevices: smartDevicesMap.get(system.id) ?? [],
+    }),
+  );
 
   const orderList = qOrder
-    ? qOrder.split(",").map((n) => n.trim().toLowerCase()).filter(Boolean)
+    ? qOrder
+        .split(",")
+        .map((n) => n.trim().toLowerCase())
+        .filter(Boolean)
     : [];
 
   bundles.sort((a, b) => {
@@ -194,11 +206,13 @@ async function fetchWidget(
   };
 
   const html = renderWidget(bundles, alerts, opts);
-  console.log(`[widget] fetch complete in ${Date.now() - t0}ms (${bundles.length} systems)`);
+  console.log(
+    `[widget] fetch complete in ${Date.now() - t0}ms (${bundles.length} systems)`,
+  );
   return html;
 }
 
-app.get("/", async (req: Request, res: Response) => {
+app.get("/beszel", async (req: Request, res: Response) => {
   try {
     const qSystems = req.query.systems as string | undefined;
     const qStatus = req.query.status as string | undefined;
@@ -211,7 +225,9 @@ app.get("/", async (req: Request, res: Response) => {
     let iconMap = ENV_ICON_MAP;
     const hasIconOverrides = ICON_KEYS.some((k) => req.query[`icon_${k}`]);
     if (hasIconOverrides) {
-      const reqIconOverrides: Partial<Record<IconKey, string>> = { ...ICON_ENV };
+      const reqIconOverrides: Partial<Record<IconKey, string>> = {
+        ...ICON_ENV,
+      };
       for (const key of ICON_KEYS) {
         const qval = req.query[`icon_${key}`] as string | undefined;
         if (qval) reqIconOverrides[key] = qval;
@@ -246,14 +262,21 @@ app.get("/", async (req: Request, res: Response) => {
           });
         })
         .catch((err) => {
-          console.error("Background cache refresh failed:", err instanceof Error ? err.message : err);
+          console.error(
+            "Background cache refresh failed:",
+            err instanceof Error ? err.message : err,
+          );
           entry.refreshing = false;
         });
     } else {
       // No cache entry (or refresh already in flight) — fetch synchronously
       html = await fetchWidget(filter, qOrder, qCollapseAfter, iconMap);
       if (CACHE_TTL > 0) {
-        cache.set(cacheKey, { html, expiresAt: now + CACHE_TTL * 1000, refreshing: false });
+        cache.set(cacheKey, {
+          html,
+          expiresAt: now + CACHE_TTL * 1000,
+          refreshing: false,
+        });
       }
     }
 
@@ -261,7 +284,10 @@ app.get("/", async (req: Request, res: Response) => {
     res.setHeader("Widget-Title-URL", WIDGET_TITLE_URL);
     res.setHeader("Widget-Content-Type", "html");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Cache-Control", `public, max-age=${CACHE_TTL}, stale-while-revalidate=${CACHE_TTL * 2}`);
+    res.setHeader(
+      "Cache-Control",
+      `public, max-age=${CACHE_TTL}, stale-while-revalidate=${CACHE_TTL * 2}`,
+    );
     res.send(html);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -281,8 +307,187 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
+// ---- Copilot Extension ----
+
+const copilotConfig: CopilotConfig | null = process.env.GH_TOKEN
+  ? {
+      token: requireEnv("GH_TOKEN"),
+      username: requireEnv("GH_USERNAME"),
+    }
+  : null;
+
+const COPILOT_WIDGET_TITLE = optionalEnv("COPILOT_WIDGET_TITLE", "GitHub Copilot");
+const COPILOT_CACHE_TTL = parseInt(optionalEnv("COPILOT_CACHE_TTL", "300"), 10);
+const COPILOT_CREDITS = parseInt(optionalEnv("COPILOT_CREDITS", "1500"), 10);
+const COPILOT_CREDIT_VALUE = parseFloat(optionalEnv("COPILOT_CREDIT_VALUE", "0.01"));
+
+const copilotCache = new Map<string, { html: string; expiresAt: number }>();
+
+let copilotClient: GitHubCopilotClient | null = null;
+if (copilotConfig) {
+  copilotClient = new GitHubCopilotClient(copilotConfig);
+}
+
+async function fetchCopilotHtml(url: string): Promise<string> {
+  const cacheKey = url;
+  const now = Date.now();
+  const entry = copilotCache.get(cacheKey);
+  if (entry && now < entry.expiresAt) return entry.html;
+
+  const u = new URL(url, "http://localhost");
+  const qYear = u.searchParams.get("year") ? parseInt(u.searchParams.get("year")!, 10) : undefined;
+  const qMonth = u.searchParams.get("month") ? parseInt(u.searchParams.get("month")!, 10) : undefined;
+  const qModel = u.searchParams.get("model") || undefined;
+  const qProduct = u.searchParams.get("product") || undefined;
+
+  const report = await copilotClient!.getPremiumRequestUsage({
+    year: qYear,
+    month: qMonth,
+    model: qModel,
+    product: qProduct,
+  });
+
+  const opts: CopilotRenderOptions = {
+    title: COPILOT_WIDGET_TITLE,
+    titleUrl: `https://github.com/settings/billing`,
+    totalCredits: COPILOT_CREDITS,
+    creditValue: COPILOT_CREDIT_VALUE,
+  };
+
+  const html = renderCopilotWidget(report, opts);
+  if (COPILOT_CACHE_TTL > 0) {
+    copilotCache.set(cacheKey, { html, expiresAt: now + COPILOT_CACHE_TTL * 1000 });
+  }
+  return html;
+}
+
+if (copilotConfig) {
+  app.get("/copilot", async (req: Request, res: Response) => {
+    try {
+      const html = await fetchCopilotHtml(req.url);
+      res.setHeader("Widget-Title", COPILOT_WIDGET_TITLE);
+      res.setHeader("Widget-Content-Type", "html");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Copilot extension error:", message);
+      res.setHeader("Widget-Title", COPILOT_WIDGET_TITLE);
+      res.setHeader("Widget-Content-Type", "html");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(500).send(
+        `<p class="color-negative size-h5">&#9888; Copilot extension error</p>
+       <p class="color-subdue size-h6">${escHtml(message)}</p>`,
+      );
+    }
+  });
+}
+
+// ---- OpenRouter Extension ----
+
+const openRouterConfig = process.env.OPENROUTER_API_KEY
+  ? { apiKey: requireEnv("OPENROUTER_API_KEY") }
+  : null;
+
+const OPENROUTER_WIDGET_TITLE = optionalEnv("OPENROUTER_WIDGET_TITLE", "OpenRouter Credits");
+const OPENROUTER_CACHE_TTL = parseInt(optionalEnv("OPENROUTER_CACHE_TTL", "300"), 10);
+
+const openRouterCache = new Map<string, { html: string; expiresAt: number }>();
+
+let openRouterClient: OpenRouterClient | null = null;
+if (openRouterConfig) {
+  openRouterClient = new OpenRouterClient(openRouterConfig);
+}
+
+async function fetchOpenRouterHtml(): Promise<string> {
+  const cacheKey = "/openrouter";
+  const now = Date.now();
+  const entry = openRouterCache.get(cacheKey);
+  if (entry && now < entry.expiresAt) return entry.html;
+
+  const keyData = await openRouterClient!.getCredits();
+  const opts: OpenRouterRenderOptions = { title: OPENROUTER_WIDGET_TITLE };
+  const html = renderOpenRouterWidget(keyData, opts);
+  if (OPENROUTER_CACHE_TTL > 0) {
+    openRouterCache.set(cacheKey, { html, expiresAt: now + OPENROUTER_CACHE_TTL * 1000 });
+  }
+  return html;
+}
+
+if (openRouterConfig) {
+  app.get("/openrouter", async (_req: Request, res: Response) => {
+    try {
+      const html = await fetchOpenRouterHtml();
+      res.setHeader("Widget-Title", OPENROUTER_WIDGET_TITLE);
+      res.setHeader("Widget-Content-Type", "html");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("OpenRouter extension error:", message);
+      res.setHeader("Widget-Title", OPENROUTER_WIDGET_TITLE);
+      res.setHeader("Widget-Content-Type", "html");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(500).send(
+        `<p class="color-negative size-h5">&#9888; OpenRouter extension error</p>
+       <p class="color-subdue size-h6">${escHtml(message)}</p>`,
+      );
+    }
+  });
+}
+
+// ---- Combined AI Credits Route ----
+// ?source=copilot  → only Copilot
+// ?source=openrouter → only OpenRouter
+// ?source=all or omitted → all configured sources
+
+app.get("/ai-credits", async (req: Request, res: Response) => {
+  try {
+    const source = (req.query.source as string || "all").toLowerCase();
+    const parts: string[] = [];
+
+    const divider = `<div style="height:1px;background:var(--color-widget-border,#333);margin:12px 0"></div>`;
+
+    if ((source === "all" || source === "copilot") && copilotConfig) {
+      parts.push(await fetchCopilotHtml("/copilot"));
+    }
+    if ((source === "all" || source === "openrouter") && openRouterConfig) {
+      parts.push(await fetchOpenRouterHtml());
+    }
+
+    if (parts.length === 0) {
+      const hints: string[] = [];
+      if (!copilotConfig) hints.push("GH_TOKEN+GH_USERNAME");
+      if (!openRouterConfig) hints.push("OPENROUTER_API_KEY");
+      res.setHeader("Widget-Title", "AI Credits");
+      res.setHeader("Widget-Content-Type", "html");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(
+        `<p class="color-negative size-h5">&#9888; No AI credit sources configured</p>
+       <p class="color-subdue size-h6">Set ${hints.join(" or ")} to enable.</p>`,
+      );
+      return;
+    }
+
+    res.setHeader("Widget-Title", "AI Credits");
+    res.setHeader("Widget-Content-Type", "html");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<div style="display:flex;flex-direction:column;gap:8px">${parts.join(divider)}</div>`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("AI credits error:", message);
+    res.setHeader("Widget-Title", "AI Credits");
+    res.setHeader("Widget-Content-Type", "html");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.status(500).send(
+      `<p class="color-negative size-h5">&#9888; AI credits error</p>
+     <p class="color-subdue size-h6">${escHtml(message)}</p>`,
+    );
+  }
+});
+
 app.listen(PORT, () => {
-  console.log(`Glance Beszel extension running on port ${PORT}`);
+  console.log(`Glance extensions running on port ${PORT}`);
   console.log(`  Beszel URL:   ${beszelConfig.url}`);
   console.log(`  Widget title: ${WIDGET_TITLE}`);
   console.log(`  Show alerts:  ${SHOW_ALERTS}`);
@@ -290,6 +495,16 @@ app.listen(PORT, () => {
   if (SYSTEM_FILTER) console.log(`  System filter: ${SYSTEM_FILTER}`);
   if (STATUS_FILTER) console.log(`  Status filter: ${STATUS_FILTER}`);
   if (SYSTEM_ORDER) console.log(`  System order:  ${SYSTEM_ORDER}`);
+  if (copilotConfig) {
+    console.log(`  Copilot user: ${copilotConfig.username}`);
+  } else {
+    console.log(`  Copilot:      disabled (set GH_TOKEN and GH_USERNAME)`);
+  }
+  if (openRouterConfig) {
+    console.log(`  OpenRouter:   enabled`);
+  } else {
+    console.log(`  OpenRouter:   disabled (set OPENROUTER_API_KEY)`);
+  }
 });
 
 function escHtml(str: string): string {

@@ -1,6 +1,6 @@
 # glance-beszel
 
-A [Glance](https://github.com/glanceapp/glance) extension that pulls live system stats from [Beszel](https://beszel.dev) and renders a rich homelab overview widget.
+A [Glance](https://github.com/glanceapp/glance) extension that pulls live system stats from [Beszel](https://beszel.dev) and renders a rich homelab overview widget, plus a GitHub Copilot usage widget.
 
 ## Features
 
@@ -13,6 +13,7 @@ A [Glance](https://github.com/glanceapp/glance) extension that pulls live system
 - **Category icon overrides** — assign proxmox / vm / lxc / rpi / nas / docker icons to specific systems
 - **Flexible ordering** — explicit system order via `order=` param
 - **Filtering** — by system name or status
+- **GitHub Copilot usage** — premium request usage by model with cost breakdown
 
 ---
 
@@ -95,7 +96,67 @@ All options can be passed as query parameters per widget, overriding the server-
   cache: 1m
 ```
 
----
+### Copilot widget
+
+Enable by setting `GH_TOKEN` (GitHub PAT with `read:billing` scope) and `GH_USERNAME`.
+
+```yaml
+- type: extension
+  url: http://localhost:8088/copilot
+  allow-potentially-dangerous-html: true
+  cache: 5m
+```
+
+Query parameters:
+
+| Param    | Example            | Description |
+|----------|--------------------|-------------|
+| `year`   | `?year=2026`       | Filter to a specific year (default: current) |
+| `month`  | `?year=2026&month=5` | Filter to a specific month (1-12) |
+| `model`  | `?model=claude-sonnet-4` | Filter by model name (case-insensitive) |
+| `product`| `?product=copilot` | Filter by product name (case-insensitive) |
+
+```yaml
+- type: extension
+  url: http://localhost:8088/copilot?year=2026&month=5
+  allow-potentially-dangerous-html: true
+  cache: 5m
+```
+
+### OpenRouter widget
+
+Enable by setting `OPENROUTER_API_KEY`.
+
+```yaml
+- type: extension
+  url: http://localhost:8088/openrouter
+  allow-potentially-dangerous-html: true
+  cache: 5m
+```
+
+### AI Credits (combined)
+
+Shows all configured credit sources (Copilot + OpenRouter) in one widget. Filter with `?source=`:
+
+```yaml
+# Show both Copilot and OpenRouter
+- type: extension
+  url: http://localhost:8088/ai-credits
+  allow-potentially-dangerous-html: true
+  cache: 5m
+
+# Show only Copilot
+- type: extension
+  url: http://localhost:8088/ai-credits?source=copilot
+  allow-potentially-dangerous-html: true
+  cache: 5m
+
+# Show only OpenRouter
+- type: extension
+  url: http://localhost:8088/ai-credits?source=openrouter
+  allow-potentially-dangerous-html: true
+  cache: 5m
+```
 
 ## Configuration
 
@@ -111,6 +172,26 @@ All settings are env vars (set in `.env` or the system service environment). Mos
 | `PORT`             | no       | `8088`        | Port the extension listens on |
 | `WIDGET_TITLE`     | no       | `Beszel`      | Widget title sent via `Widget-Title` header |
 | `WIDGET_TITLE_URL` | no       | `$BESZEL_URL` | URL the widget title links to |
+### Copilot
+
+| Variable               | Required | Default          | Description |
+|------------------------|----------|------------------|-------------|
+| `GH_TOKEN`             | **yes*** | —                | GitHub PAT with `read:billing` scope (enables Copilot widget) |
+| `GH_USERNAME`          | **yes*** | —                | GitHub username |
+| `COPILOT_WIDGET_TITLE` | no       | `GitHub Copilot` | Widget title sent via `Widget-Title` header |
+| `COPILOT_CACHE_TTL`    | no       | `300`            | Cache TTL in seconds |
+| `COPILOT_CREDITS`      | no       | `1500`           | Total monthly AI credits allowed |
+| `COPILOT_CREDIT_VALUE` | no       | `0.01`           | Dollar value per credit |
+
+### OpenRouter
+
+| Variable                   | Required | Default              | Description |
+|----------------------------|----------|----------------------|-------------|
+| `OPENROUTER_API_KEY`       | **yes*** | —                    | OpenRouter API key (shows credit balance) |
+| `OPENROUTER_WIDGET_TITLE`  | no       | `OpenRouter Credits` | Widget title sent via `Widget-Title` header |
+| `OPENROUTER_CACHE_TTL`     | no       | `300`                | Cache TTL in seconds |
+
+*\* Required only when using the respective widget.*
 
 ### Display
 
@@ -185,17 +266,23 @@ Filter by name pattern (raw PocketBase expression):
 ```
 .
 ├── src/
-│   ├── index.ts        # Express server, query param handling, sort/filter logic
-│   ├── beszel.ts       # Beszel/PocketBase API client and TypeScript interfaces
-│   └── template.ts     # EJS renderer, icon helpers (lucide + simple-icons)
+│   ├── index.ts           # Express server, query param handling, sort/filter logic
+│   ├── beszel.ts          # Beszel/PocketBase API client and TypeScript interfaces
+│   ├── template.ts        # EJS renderer, icon helpers (lucide + simple-icons)
+│   ├── copilot.ts           # GitHub Copilot billing API client
+│   ├── copilot-template.ts  # Copilot EJS renderer and icon helpers
+│   ├── openrouter.ts        # OpenRouter credits API client
+│   └── openrouter-template.ts # OpenRouter EJS renderer
 ├── templates/
-│   ├── widget.ejs          # Root template, CSS, system list
+│   ├── widget.ejs          # Beszel root template, CSS, system list
 │   ├── system-entry.ejs    # Per-system row (icon, name, IP, stat bars, expand)
 │   ├── stat-bars.ejs       # CPU/RAM/disk progress bars
 │   ├── containers.ejs      # Docker/Podman containers section
 │   ├── services.ejs        # Systemd services section
 │   ├── smart-devices.ejs   # SMART disk health section
-│   └── alert-banner.ejs    # Triggered alerts banner
+│   ├── alert-banner.ejs    # Triggered alerts banner
+│   ├── copilot.ejs         # Copilot premium request usage widget
+│   └── openrouter.ejs      # OpenRouter credits widget
 ├── install.sh          # One-liner installer (systemd + launchd)
 ├── Dockerfile
 ├── docker-compose.yml

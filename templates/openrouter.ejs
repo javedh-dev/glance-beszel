@@ -1,0 +1,54 @@
+<%# OpenRouter credits widget -%>
+<style>
+  .or-root{container-type:inline-size;container-name:or;color:var(--color-text)}
+  .or-bar-wrap{margin-bottom:4px}
+  .or-bar{
+    height:8px;
+    border-radius:4px;
+    background:var(--color-progress-border, #333);
+    overflow:hidden;
+    margin:10px 0px;
+  }
+  .or-bar-fill{
+    height:100%;
+    border-radius:4px;
+    background:var(--color-positive);
+    transition:width .3s;
+  }
+  .or-bar-labels{
+    display:flex;
+    justify-content:space-between;
+    font-size:var(--font-size-h6);
+  }
+  .or-footer{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:6px;
+    font-size:var(--font-size-h6);
+    margin-top:4px;
+  }
+</style>
+
+<div class="or-root">
+  <div class="size-h4 color-highlight" style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><%- icons.OpenRouter %>OpenRouter Credits</div>
+  <div class="or-bar-wrap">
+<% if (limit > 0) { %>
+    <div class="or-bar">
+      <div class="or-bar-fill" style="width:<%= Math.min(100, usagePercent) %>%"></div>
+    </div>
+    <div class="or-bar-labels">
+      <span style="display:flex;align-items:center;gap:4px"><%- icons.DollarSign %>$<%= usage.toFixed(2) %> / $<%= limit.toFixed(2) %></span>
+      <span><%= usagePercent %>% used</span>
+    </div>
+<% } else { %>
+    <div class="or-bar-labels" style="justify-content:center">
+      <span>$<%= remaining.toFixed(2) %> credits</span>
+    </div>
+<% } %>
+  </div>
+  <div class="or-footer">
+    <%- icons.TrendingUp %><span><%= isFree ? 'Free tier' : '$' + remaining.toFixed(2) + ' remaining' %></span>
+  </div>
+</div>
+<%- svgDefs() %>

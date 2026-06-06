@@ -1,0 +1,132 @@
+<%# Copilot premium request usage widget -%>
+<style>
+  .cp-root{container-type:inline-size;container-name:cp}
+
+  .cp-root{color:var(--color-text)}
+  .cp-footer{
+    margin-top:2px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:6px;
+    font-size:var(--font-size-h6);
+  }
+
+  .cp-toggle{
+    display:flex;
+    align-items:center;
+    justify-content:start;
+    gap:4px;
+    cursor:pointer;
+    padding:2px;
+    font-size:var(--font-size-h6);
+    border-radius:var(--border-radius);
+    background:var(--color-widget-background, rgba(0,0,0,0.1));
+    user-select:none;
+  }
+
+  .cp-info {
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:6px;
+      font-size:var(--font-size-h6);
+  }
+
+  .cp-toggle:hover{opacity:0.8}
+  .cp-toggle .cp-toggle-arrow{
+    display:inline-flex;
+    transition:transform .15s;
+  }
+  .cp-body{display:none;margin-top:8px}
+  .cp-root[data-open] .cp-body{display:block}
+  .cp-root[data-open] .cp-toggle-arrow{transform:rotate(180deg)}
+
+  .cp-empty{
+    padding:4px;
+    text-align:center;
+    color:var(--color-text-subdue);
+    font-size:var(--font-size-h6);
+    border:1px solid var(--color-widget-border, #333);
+    border-radius:var(--border-radius);
+  }
+
+  .cp-bar-wrap{margin-bottom:8px}
+  .cp-bar{
+    height:8px;
+    border-radius:4px;
+    margin:10px 0px;
+    background:var(--color-progress-border, #333);
+    overflow:hidden;
+  }
+  .cp-bar-fill{
+    height:100%;
+    border-radius:4px;
+    background:var(--color-positive);
+    transition:width .3s;
+  }
+  .cp-bar-labels{
+    display:flex;
+    justify-content:space-between;
+    margin-top: 10px;
+    font-size:var(--font-size-h6);
+    color:var(--color-text);
+  }
+
+  .cp-model-list{list-style:none;padding:0;margin:0}
+  .cp-model-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:6px;
+    padding:3px 0;
+    font-size:var(--font-size-h6);
+    color:var(--color-text-highlight);
+  }
+  .cp-model-item + .cp-model-item{border-top:1px solid var(--color-widget-border, #333)}
+
+</style>
+
+<%
+  var hasUsage = modelUsage.length > 0;
+%>
+
+<div class="cp-root">
+  <div class="size-h4 color-highlight" style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><%- icons.Copilot %>Copilot Usage</div>
+  <div class="cp-bar-wrap">
+    <div class="cp-bar">
+      <div class="cp-bar-fill" style="width:<%= Math.min(100, usagePercent) %>%"></div>
+    </div>
+    <div class="cp-bar-labels">
+      <span style="display:flex;align-items:center;gap:4px"><%- icons.Sparkles %><%= usedCredits %>/<%= totalCredits %> ($<%= totalGrossAmount.toFixed(2) %>)</span>
+      <span><%= usagePercent %>% used</span>
+    </div>
+  </div>
+<div class="cp-footer">
+  <div class="cp-toggle" onclick="this.closest('.cp-root').toggleAttribute('data-open')">
+    <span class="cp-toggle-arrow"><%- icons.ChevronDown %></span>
+    Show more
+  </div>
+  <div class="cp-info flex items-center">
+    <%- icons.Calendar %>
+    <span><%= report.timePeriod.year %><% if (report.timePeriod.month) { %>-<%= String(report.timePeriod.month).padStart(2, '0') %><% } %></span>
+    <span style="margin:0 4px">·</span>
+    <span><%= report.user %></span>
+  </div>
+</div>
+  <div class="cp-body">
+<% if (hasUsage) { %>
+    <ul class="cp-model-list">
+<% modelUsage.forEach(function(m) { %>
+      <li class="cp-model-item">
+        <span><%= m.model %></span>
+        <span><%= m.requests.toLocaleString() %> ($<%= m.cost.toFixed(2) %>)</span>
+      </li>
+<% }); %>
+    </ul>
+<% } else { %>
+    <div class="cp-empty">No usage data for this period.</div>
+<% } %>
+  </div>
+</div>
+<%- svgDefs() %>
