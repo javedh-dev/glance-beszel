@@ -104,6 +104,15 @@ export class GitHubCopilotClient {
     );
   }
 
+  async getAICreditUsage(
+    params?: CopilotUsageParams,
+  ): Promise<PremiumRequestUsageReport> {
+    return this.apiFetch<PremiumRequestUsageReport>(
+      `/users/${this.config.username}/settings/billing/ai_credit/usage`,
+      params as Record<string, string | number>,
+    );
+  }
+
   async getUsageSummary(
     params?: CopilotUsageParams & { repository?: string; sku?: string },
   ): Promise<UsageSummaryReport> {

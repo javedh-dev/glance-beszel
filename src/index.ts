@@ -6,7 +6,10 @@ import { renderWidget, RenderOptions, SystemBundle } from "./template";
 import { GitHubCopilotClient, CopilotConfig } from "./copilot";
 import { renderCopilotWidget, CopilotRenderOptions } from "./copilot-template";
 import { OpenRouterClient } from "./openrouter";
-import { renderOpenRouterWidget, OpenRouterRenderOptions } from "./openrouter-template";
+import {
+  renderOpenRouterWidget,
+  OpenRouterRenderOptions,
+} from "./openrouter-template";
 
 // ---- Config from environment variables ----
 
@@ -316,10 +319,15 @@ const copilotConfig: CopilotConfig | null = process.env.GH_TOKEN
     }
   : null;
 
-const COPILOT_WIDGET_TITLE = optionalEnv("COPILOT_WIDGET_TITLE", "GitHub Copilot");
+const COPILOT_WIDGET_TITLE = optionalEnv(
+  "COPILOT_WIDGET_TITLE",
+  "GitHub Copilot",
+);
 const COPILOT_CACHE_TTL = parseInt(optionalEnv("COPILOT_CACHE_TTL", "300"), 10);
 const COPILOT_CREDITS = parseInt(optionalEnv("COPILOT_CREDITS", "1500"), 10);
-const COPILOT_CREDIT_VALUE = parseFloat(optionalEnv("COPILOT_CREDIT_VALUE", "0.01"));
+const COPILOT_CREDIT_VALUE = parseFloat(
+  optionalEnv("COPILOT_CREDIT_VALUE", "0.01"),
+);
 
 const copilotCache = new Map<string, { html: string; expiresAt: number }>();
 
@@ -335,12 +343,16 @@ async function fetchCopilotHtml(url: string): Promise<string> {
   if (entry && now < entry.expiresAt) return entry.html;
 
   const u = new URL(url, "http://localhost");
-  const qYear = u.searchParams.get("year") ? parseInt(u.searchParams.get("year")!, 10) : undefined;
-  const qMonth = u.searchParams.get("month") ? parseInt(u.searchParams.get("month")!, 10) : undefined;
+  const qYear = u.searchParams.get("year")
+    ? parseInt(u.searchParams.get("year")!, 10)
+    : undefined;
+  const qMonth = u.searchParams.get("month")
+    ? parseInt(u.searchParams.get("month")!, 10)
+    : undefined;
   const qModel = u.searchParams.get("model") || undefined;
   const qProduct = u.searchParams.get("product") || undefined;
 
-  const report = await copilotClient!.getPremiumRequestUsage({
+  const report = await copilotClient!.getAICreditUsage({
     year: qYear,
     month: qMonth,
     model: qModel,
@@ -356,7 +368,10 @@ async function fetchCopilotHtml(url: string): Promise<string> {
 
   const html = renderCopilotWidget(report, opts);
   if (COPILOT_CACHE_TTL > 0) {
-    copilotCache.set(cacheKey, { html, expiresAt: now + COPILOT_CACHE_TTL * 1000 });
+    copilotCache.set(cacheKey, {
+      html,
+      expiresAt: now + COPILOT_CACHE_TTL * 1000,
+    });
   }
   return html;
 }
@@ -389,8 +404,14 @@ const openRouterConfig = process.env.OPENROUTER_API_KEY
   ? { apiKey: requireEnv("OPENROUTER_API_KEY") }
   : null;
 
-const OPENROUTER_WIDGET_TITLE = optionalEnv("OPENROUTER_WIDGET_TITLE", "OpenRouter Credits");
-const OPENROUTER_CACHE_TTL = parseInt(optionalEnv("OPENROUTER_CACHE_TTL", "300"), 10);
+const OPENROUTER_WIDGET_TITLE = optionalEnv(
+  "OPENROUTER_WIDGET_TITLE",
+  "OpenRouter Credits",
+);
+const OPENROUTER_CACHE_TTL = parseInt(
+  optionalEnv("OPENROUTER_CACHE_TTL", "300"),
+  10,
+);
 
 const openRouterCache = new Map<string, { html: string; expiresAt: number }>();
 
@@ -409,7 +430,10 @@ async function fetchOpenRouterHtml(): Promise<string> {
   const opts: OpenRouterRenderOptions = { title: OPENROUTER_WIDGET_TITLE };
   const html = renderOpenRouterWidget(keyData, opts);
   if (OPENROUTER_CACHE_TTL > 0) {
-    openRouterCache.set(cacheKey, { html, expiresAt: now + OPENROUTER_CACHE_TTL * 1000 });
+    openRouterCache.set(cacheKey, {
+      html,
+      expiresAt: now + OPENROUTER_CACHE_TTL * 1000,
+    });
   }
   return html;
 }
@@ -443,10 +467,10 @@ if (openRouterConfig) {
 
 app.get("/ai-credits", async (req: Request, res: Response) => {
   try {
-    const source = (req.query.source as string || "all").toLowerCase();
+    const source = ((req.query.source as string) || "all").toLowerCase();
     const parts: string[] = [];
 
-    const divider = `<div style="height:1px;background:var(--color-widget-border,#333);margin:12px 0"></div>`;
+    const divider = `<div style="height:1px;background:var(--color-widget-border,#777);margin:12px 0"></div>`;
 
     if ((source === "all" || source === "copilot") && copilotConfig) {
       parts.push(await fetchCopilotHtml("/copilot"));
@@ -472,7 +496,9 @@ app.get("/ai-credits", async (req: Request, res: Response) => {
     res.setHeader("Widget-Title", "AI Credits");
     res.setHeader("Widget-Content-Type", "html");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`<div style="display:flex;flex-direction:column;gap:8px">${parts.join(divider)}</div>`);
+    res.send(
+      `<div style="display:flex;flex-direction:column;gap:8px">${parts.join(divider)}</div>`,
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("AI credits error:", message);
